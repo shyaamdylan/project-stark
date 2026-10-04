@@ -1,0 +1,38 @@
+{
+  "name": "project-alpha",
+  "productName": "Project Alpha",
+  "version": "0.1.0",
+  "description": "A little animated buddy that lives at the bottom of your Mac screen, talks with an ElevenLabs voice, and points at buttons when you ask.",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.projectalpha.buddy",
+    "productName": "Project Alpha",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg"
+      ],
+      "extendInfo": {
+        "LSUIElement": true,
+        "NSAppleEventsUsageDescription": "Project Alpha uses System Events to find buttons in the app you're using so it can point at them."
+      }
+    }
+  }
+}

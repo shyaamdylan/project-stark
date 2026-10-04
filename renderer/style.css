@@ -1,0 +1,286 @@
+:root {
+  --ink: #241a4d;
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.45);
+  --bubble: #ffffff;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Helvetica Neue', sans-serif;
+  user-select: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---------- buddy ---------- */
+
+#buddy {
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  width: 140px;
+  height: 160px;
+  transition-property: left;
+  transition-timing-function: cubic-bezier(0.45, 0, 0.3, 1);
+}
+
+#char {
+  overflow: visible;
+  cursor: pointer;
+  filter: drop-shadow(0 6px 10px rgba(40, 20, 120, 0.25));
+}
+
+#shadow {
+  fill: rgba(0, 0, 0, 0.18);
+  transform-origin: 70px 152px;
+  animation: shadow 2.4s ease-in-out infinite;
+}
+
+#bodygroup {
+  animation: bob 2.4s ease-in-out infinite;
+  transform-origin: 70px 140px;
+}
+
+#belly {
+  fill: rgba(255, 255, 255, 0.18);
+}
+.cheek {
+  fill: #ff8fb8;
+  opacity: 0.55;
+}
+.foot {
+  fill: #4a31c9;
+}
+
+.arm line {
+  stroke: #5a3fe0;
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+.arm circle {
+  fill: #7b61ff;
+}
+.arm {
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#armL {
+  transform: rotate(115deg);
+}
+#armR {
+  transform: rotate(65deg);
+}
+
+#antenna path {
+  stroke: #5a3fe0;
+  stroke-width: 4;
+  fill: none;
+  stroke-linecap: round;
+}
+#antenna circle {
+  fill: #ffd84d;
+}
+#antenna {
+  transform-origin: 70px 34px;
+  animation: wiggle 3.2s ease-in-out infinite;
+}
+
+.white {
+  fill: #fff;
+}
+.pupil {
+  fill: var(--ink);
+}
+.glint {
+  fill: #fff;
+}
+.eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.07s;
+}
+#eyes.blink .eye {
+  transform: scaleY(0.08);
+}
+
+#mouth {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+#buddy.talking #mouth {
+  fill: #c2185b;
+  animation: talk 0.18s ease-in-out infinite alternate;
+}
+#buddy.worried #mouth {
+  transform: scaleY(-1);
+}
+
+/* walking: hop + shuffling feet */
+#buddy.walking #bodygroup {
+  animation: hop 0.32s ease-in-out infinite;
+}
+#buddy.walking #footL {
+  animation: step 0.32s ease-in-out infinite;
+}
+#buddy.walking #footR {
+  animation: step 0.32s ease-in-out infinite reverse;
+}
+
+/* thinking: little sway */
+#buddy.thinking #bodygroup {
+  animation: sway 0.9s ease-in-out infinite;
+}
+
+#buddy.excited #bodygroup {
+  animation: jump 0.5s ease-out 2;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(-5px) scale(0.98, 1.02); }
+}
+@keyframes shadow {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(0.88); }
+}
+@keyframes hop {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-9px) rotate(2deg); }
+}
+@keyframes step {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes sway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
+}
+@keyframes jump {
+  0% { transform: translateY(0) scale(1.08, 0.92); }
+  40% { transform: translateY(-22px) scale(0.95, 1.06); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(8deg); }
+}
+@keyframes talk {
+  from { transform: scaleY(0.6); }
+  to { transform: scaleY(1.5); }
+}
+
+/* ---------- speech bubble ---------- */
+
+#bubble {
+  position: absolute;
+  bottom: 168px;
+  width: 250px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--bubble);
+  color: var(--ink);
+  border-radius: 18px;
+  box-shadow: 0 10px 30px rgba(30, 20, 80, 0.25), 0 0 0 1px rgba(30, 20, 80, 0.06);
+  font-size: 14px;
+  line-height: 1.35;
+  animation: pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  user-select: text;
+}
+#bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -9px;
+  left: var(--tail, 50%);
+  width: 18px;
+  height: 18px;
+  background: var(--bubble);
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 3px;
+}
+#say:empty {
+  display: none;
+}
+#say:not(:empty) + #ask {
+  margin-top: 8px;
+}
+#ask-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #e4e0ff;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--ink);
+  outline: none;
+}
+#ask-input:focus {
+  border-color: #7b61ff;
+}
+
+@keyframes pop {
+  from { transform: scale(0.6) translateY(10px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ---------- pointer + highlight ---------- */
+
+#pointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 6px var(--accent-glow));
+}
+#pointer path {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+#spot {
+  position: absolute;
+  pointer-events: none;
+  border: 3px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow);
+  animation: spot-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), pulse 1.2s ease-in-out 0.35s infinite;
+}
+#spot-label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+#spot.above #spot-label {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
+
+@keyframes spot-in {
+  from { transform: scale(1.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow); }
+  50% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0.15), 0 0 32px var(--accent-glow); }
+}

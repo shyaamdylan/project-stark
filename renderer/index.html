@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' data:; img-src 'self' data:" />
+    <title>Project Alpha</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Highlight ring drawn around the found button -->
+    <div id="spot" class="hidden"><span id="spot-label"></span></div>
+
+    <!-- Little blue cursor that flies from the buddy's hand to the target -->
+    <svg id="pointer" class="hidden" viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+      <path d="M3 2 L3 19 L8 14.5 L11.5 22 L14.5 20.6 L11 13.3 L18 13.3 Z" />
+    </svg>
+
+    <div id="buddy">
+      <div id="bubble" class="hit hidden">
+        <div id="say"></div>
+        <form id="ask" class="hidden" autocomplete="off">
+          <input id="ask-input" type="text" placeholder="What should I find? e.g. “share”" spellcheck="false" />
+        </form>
+      </div>
+
+      <svg id="char" class="hit" viewBox="0 0 140 160" width="140" height="160">
+        <defs>
+          <radialGradient id="skin" cx="40%" cy="30%" r="75%">
+            <stop offset="0%" stop-color="#a99bff" />
+            <stop offset="60%" stop-color="#7b61ff" />
+            <stop offset="100%" stop-color="#5a3fe0" />
+          </radialGradient>
+        </defs>
+
+        <ellipse id="shadow" cx="70" cy="152" rx="38" ry="6" />
+
+        <g id="feet">
+          <ellipse id="footL" class="foot" cx="52" cy="142" rx="13" ry="7" />
+          <ellipse id="footR" class="foot" cx="88" cy="142" rx="13" ry="7" />
+        </g>
+
+        <g id="bodygroup">
+
+          <g id="antenna">
+            <path d="M70 34 Q74 20 82 14" />
+            <circle cx="83" cy="13" r="5" />
+          </g>
+
+          <path id="body" d="M70 32 C104 32 118 60 118 92 C118 124 98 140 70 140 C42 140 22 124 22 92 C22 60 36 32 70 32 Z" fill="url(#skin)" />
+          <ellipse id="belly" cx="70" cy="110" rx="26" ry="20" />
+          <ellipse class="cheek" cx="42" cy="88" rx="7" ry="4" />
+          <ellipse class="cheek" cx="98" cy="88" rx="7" ry="4" />
+
+          <!-- Arms (drawn over the body) rotate around the shoulders; 0deg points straight right. -->
+          <g id="armL" class="arm" style="transform-origin: 30px 98px">
+            <line x1="30" y1="98" x2="70" y2="98" />
+            <circle cx="70" cy="98" r="7" />
+          </g>
+          <g id="armR" class="arm" style="transform-origin: 110px 98px">
+            <line x1="110" y1="98" x2="150" y2="98" />
+            <circle cx="150" cy="98" r="7" />
+          </g>
+
+          <g id="eyes">
+            <g class="eye">
+              <ellipse cx="55" cy="70" rx="12" ry="14" class="white" />
+              <circle id="pupilL" cx="55" cy="70" r="6" class="pupil" />
+              <circle id="glintL" cx="57" cy="67" r="2" class="glint" />
+            </g>
+            <g class="eye">
+              <ellipse cx="85" cy="70" rx="12" ry="14" class="white" />
+              <circle id="pupilR" cx="85" cy="70" r="6" class="pupil" />
+              <circle id="glintR" cx="87" cy="67" r="2" class="glint" />
+            </g>
+          </g>
+
+          <path id="mouth" d="M60 96 Q70 106 80 96" />
+        </g>
+      </svg>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
