@@ -137,6 +137,44 @@ test("his own clicks don't count as the user's", async () => {
   assert.equal((await h.run.run()).status, 'done');
 });
 
+test('helping with a hand-off takes more than one click: he waits out the episode', async () => {
+  // A hand-off ("I can't find X, would you click it for me?") often needs the
+  // user to do several clicks in a row (search, then pick a result) before
+  // Jarvis's own next step can be found again. A click right after the one
+  // that resolved the hand-off must not read as "you've taken over."
+  const h = harness({
+    answers: ['0400', 'yes', 'yes'],
+    screen: () => [el('AXMenuBarItem', 'File'), el('AXTextField', 'Cost center', { value: '0400' }), el('AXButton', 'Send')],
+  });
+  let handoffs = 0;
+  h.run.emit = (ev) => {
+    if (ev.type === 'say') {
+      handoffs++;
+      setTimeout(() => {
+        h.run.onUserClick(); // resolves the hand-off
+        h.run.onUserClick(); // a second, unrelated click moments later: still helping
+      }, 5);
+    }
+  };
+  const res = await h.run.run();
+  assert.equal(res.status, 'done');
+  assert.ok(handoffs >= 1);
+});
+
+test('a click long after the last hand-off still stops him', async () => {
+  const h = harness({ answers: ['0400', 'yes'] });
+  h.run.emit = (ev) => {
+    if (ev.type === 'point' && ev.target.label === 'Cost center') {
+      h.run.actedAt = 0;
+      h.run.assistUntil = 0; // no recent hand-off to be continuing
+      h.run.onUserClick();
+    }
+  };
+  const res = await h.run.run();
+  assert.equal(res.status, 'stopped');
+  assert.equal(res.reason, 'user-click');
+});
+
 test("can't find a button: asks the user to click it, then carries on", async () => {
   const h = harness({
     answers: ['0400', 'yes', 'yes'],
@@ -227,6 +265,14 @@ test('sensitive fields', () => {
 test('only a clear yes is a yes', () => {
   for (const t of ['yes', 'Yeah.', 'go ahead', 'Proceed', 'do it', 'ok', 'Jarvis, yes']) assert.ok(isYes(t), t);
   for (const t of ['', 'no', 'wait', 'hmm', "yes but don't send it", 'not yet', 'stop']) assert.ok(!isYes(t), t);
+});
+
+test('a yes can lead with an interjection, not just the bare word', () => {
+  // Real answers to "Shall I proceed?" rarely start with the bare affirmative
+  // word. This is the literal line that got a live run wrongly declined.
+  for (const t of ['Perfect. Go for it', 'Great, do it', 'Sounds good, go ahead', 'Brilliant, proceed'])
+    assert.ok(isYes(t), t);
+  for (const t of ['Perfect, but not that one', "Great, don't send it"]) assert.ok(!isYes(t), t);
 });
 
 test('field values compare loosely', () => {

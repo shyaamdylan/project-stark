@@ -30,6 +30,7 @@ const AIM_MS = 650; // let the orb's cursor arrive before clicking, so you can s
 const SETTLE_MS = 700; // give the app a moment to react after each action
 const LOOK_MS = 1500;
 const HANDOFF_MS = 90000; // how long to wait for the user to do something for him
+const ASSIST_GRACE_MS = 10000; // after a hand-off click, more clicks for that same episode don't stop him
 const MAX_RUN_MS = 15 * 60 * 1000;
 
 // ---------- safety rules (pure, tested) ----------
@@ -58,10 +59,17 @@ function spokenKeys(keys) {
 }
 
 // Only a clear yes counts. Anything else (silence, "hmm", "wait") is a no.
+//
+// People answer with an interjection before the actual yes ("Perfect, go for
+// it.", "Great, do it.", "Sounds good, proceed."), so the affirmative phrase
+// only needs to start a clause (the beginning of the answer, or right after
+// a ., ! or ,) rather than the whole answer. The negation check still scans
+// the entire answer, so a hedge anywhere ("yes but don't send it") still wins.
 function isYes(text) {
   const t = String(text || '').trim().toLowerCase().replace(/^(?:jarvis|um+|uh+|well|so)[\s,.!]+/, '');
   if (/\b(no|not|don'?t|stop|wait|cancel|hold)\b/.test(t)) return false;
-  return /^(yes|yeah|yep|yup|sure|correct|right|ok(ay)?|go( ahead)?|proceed|do it|carry on|continue|please( do)?|affirmative|absolutely|of course|very well|make it so|go for it|sounds good|that'?s (fine|right|it))\b/.test(t);
+  const CLAUSE = /(?:^|[.,!;]\s*)(yes|yeah|yep|yup|sure|correct|right|ok(ay)?|go( ahead)?|proceed|do it|carry on|continue|please( do)?|affirmative|absolutely|of course|very well|make it so|go for it|sounds good|that'?s (fine|right|it)|perfect|great|brilliant|lovely|excellent|awesome|fantastic|wonderful)\b/;
+  return CLAUSE.test(t);
 }
 
 // Loose comparison of what a field shows with what we typed ("1,000.00" vs "1000").
@@ -241,6 +249,7 @@ class JarvisRun {
     this.acting = false; // our own input events are in flight
     this.actedAt = 0;
     this.handoff = null; // resolves when the user clicks for us
+    this.assistUntil = 0; // while true, clicks continue the hand-off episode rather than stopping him
     this.asking = false; // waiting on the user's answer: they may click around to check something
     this.executing = false; // past the go-ahead, doing the steps
     this.inputs = {};
@@ -273,6 +282,15 @@ class JarvisRun {
     if (this.asking || !this.executing) return;
     // Our own clicks show up here too; ignore anything just after we acted.
     if (this.acting || Date.now() - this.actedAt < 500) return;
+    // Finding and clicking the one thing he handed off is rarely a single
+    // click in real apps (search, then pick a result; follow a link, then
+    // scroll to the right spot). Keep treating clicks as that same hand-off
+    // for a while after the first one, sliding the window with each click,
+    // instead of reading every one of them as "you've taken over, I'll stop."
+    if (Date.now() < this.assistUntil) {
+      this.assistUntil = Date.now() + ASSIST_GRACE_MS;
+      return;
+    }
     this.stop('user-click');
   }
 
@@ -360,6 +378,7 @@ class JarvisRun {
       this.stop('handoff-timeout');
       this.check();
     }
+    this.assistUntil = Date.now() + ASSIST_GRACE_MS;
     await this.wait(SETTLE_MS);
   }
 
