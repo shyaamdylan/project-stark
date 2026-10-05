@@ -40,9 +40,9 @@
         </form>
         <form id="answer" class="hidden" autocomplete="off">
           <div id="answer-phase"></div>
-          <div id="answer-input" class="heard" data-placeholder="Listening… just answer out loud"></div>
+          <div id="answer-input" class="heard" contenteditable="plaintext-only" role="textbox" aria-label="Your answer" data-placeholder="Listening… answer out loud, or click to type"></div>
           <div class="answer-actions">
-            <span class="hint">Sends when you pause</span>
+            <span class="hint" id="answer-hint">Say it, or type and press Enter</span>
             <button id="answer-skip" type="button">Skip</button>
             <button id="answer-send" type="submit">Send</button>
           </div>

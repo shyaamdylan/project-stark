@@ -91,6 +91,8 @@ the orb turns gold. "Hey Friday" switches back.
   working), he stops, at the start or halfway through, and says it needs teaching.
 - **He never types or presses keys in a terminal.** For "get PianoScribe running" he reads the
   README and tells you the commands to run yourself.
+- **Answer by voice or by typing.** When Jarvis or Friday asks you something, just answer out
+  loud, or click the answer box, type, and press **Enter** (Esc gives the keyboard back).
 - **Changed your mind?** "Wait, stop, I meant…" stops him and does what you said instead.
 - Misheard names ("Piano Scrap") are corrected against your project folders, apps and skills.
 - "How do I…" questions go to Friday, since that's learning rather than doing.

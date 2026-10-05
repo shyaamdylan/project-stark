@@ -1442,6 +1442,8 @@ ipcMain.on('set-interactive', (_e, interactive) => {
 });
 
 ipcMain.on('open-prompt', () => openPrompt());
+// Typing an answer: the overlay takes the keyboard until it's sent.
+ipcMain.on('focus-overlay', () => focusOverlay());
 
 ipcMain.on('prompt-closed', () => {
   if (!win) return;
