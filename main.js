@@ -493,7 +493,10 @@ async function snap(scan) {
     tellNoScreenRecording();
     return null;
   }
-  if (image) lastSnap = { key, at: Date.now(), image };
+  if (image) {
+    lastSnap = { key, at: Date.now(), image };
+    console.log(`[vision] looking at ${image.area === 'screen' ? 'the screen, front: ' : ''}${scan.app}${scan.window ? ` — "${scan.window}"` : ''} (${image.width}×${image.height}) because a lesson or task step is being worked out`);
+  }
   return image;
 }
 
