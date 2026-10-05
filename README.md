@@ -158,6 +158,23 @@ It searches every app window you can see on screen, including web pages in Safar
 and other Chromium browsers, plus the frontmost app's menu bar. Anything hidden behind
 another window is skipped, and when two matches are equally good the one nearer the front wins.
 
+### Try requests by typing (no voice, no mic)
+
+Test what Jarvis does without speaking, and without spending ElevenLabs credits.
+Everything he'd say is printed, and the microphone stays off:
+
+```bash
+npm run text
+```
+
+Type a request at the `>` prompt, or an answer when he asks something. You can also pass the
+lines up front: it runs them in order and quits. `STARK_DRY=1` only logs clicks, typing and
+opening things instead of doing them. It runs alongside the normal app.
+
+```bash
+STARK_DRY=1 npm run text -- "Jarvis, open the PianoScribe readme" "Jarvis, get PianoScribe running"
+```
+
 ## API keys
 
 All keys go in `.env`. See [`.env.example`](.env.example).

@@ -178,6 +178,9 @@ function score(file, words, { mtime = 0, home = os.homedir(), now = Date.now() }
   const days = Math.max(0, (now - mtime) / 86400000);
   s += 0.08 * Math.exp(-days / 30);
   if (NICE_FOLDERS.some((f) => within(file, path.join(home, f)))) s += 0.03;
+  // Deep inside a project (logs, build output) is less likely what was meant
+  // than the project folder or its top-level files.
+  if (within(file, home)) s -= 0.04 * Math.max(0, path.relative(home, path.dirname(file)).split(path.sep).length - 2);
   return s;
 }
 
@@ -250,11 +253,53 @@ async function searchInFolders(words, search, home) {
   return out;
 }
 
+// Spotlight can be switched off or still indexing (it returns nothing for the
+// whole home folder then), so the same name queries can also be answered by
+// walking the usual folders directly. Only `kMDItemDisplayName == "*word*"cd`
+// clauses are understood: every word must be in the name. Hidden folders,
+// ~/Library and build folders are skipped, and the walk is bounded.
+const WALK_SKIP = new Set(['node_modules', 'Library', 'Applications', 'Pictures', 'Music', 'Movies', 'venv', '__pycache__', 'dist', 'build', 'target', 'site-packages']);
+function walkFind(args, limit = 400, { maxDepth = 5, maxEntries = 60000 } = {}) {
+  const at = args.indexOf('-onlyin');
+  const root = at >= 0 ? args[at + 1] : os.homedir();
+  const query = args[args.length - 1];
+  const words = [...String(query).matchAll(/kMDItemDisplayName == "\*([^"*]*)\*"cd/g)].map((m) => squash(m[1])).filter(Boolean);
+  if (!words.length || /kMDItem(?!DisplayName)/.test(query)) return Promise.resolve([]);
+  const out = [];
+  let seen = 0;
+  const queue = [[root, 0]];
+  while (queue.length && out.length < limit && seen < maxEntries) {
+    const [dir, depth] = queue.shift();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const d of entries) {
+      seen++;
+      if (d.name.startsWith('.')) continue;
+      const p = path.join(dir, d.name);
+      const name = squash(d.name);
+      if (words.every((w) => name.includes(w))) out.push(p);
+      if (d.isDirectory() && depth < maxDepth && !WALK_SKIP.has(d.name) && !/\.(app|bundle|framework|photoslibrary)$/i.test(d.name)) queue.push([p, depth + 1]);
+    }
+  }
+  return Promise.resolve(out);
+}
+
+// Spotlight first; if it knows nothing at all under that folder, walk it.
+async function mdfindOrWalk(args, limit) {
+  const found = await mdfind(args, limit);
+  if (found.length) return found;
+  return walkFind(args, limit);
+}
+
 // Up to `limit` candidates, best first: { path, name, kind, blocked, score }.
 // Tries, fastest first: a file you picked for this before, names containing
 // every word, then names or contents matching (Spotlight's own search), then
 // alternative names from `rephrase` (Claude) if given.
-async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null, run = mdfind } = {}) {
+async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null, run = mdfindOrWalk } = {}) {
   const q = parseQuery(text);
   const roots = q.folder != null ? [path.join(home, q.folder)] : [home, ...appRoots(home).filter((r) => fs.existsSync(r) && !within(r, home))];
 
@@ -383,4 +428,4 @@ async function resolveFile(query, { home = os.homedir(), run } = {}) {
   return best && !best.blocked ? best.path : null;
 }
 
-module.exports = { readTextFile, resolveFile, findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, setPicksFile, rememberPick, makeRephrase };
+module.exports = { readTextFile, resolveFile, findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, walkFind, setPicksFile, rememberPick, makeRephrase };

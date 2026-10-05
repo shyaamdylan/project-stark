@@ -21,6 +21,7 @@ const { readTextFile, resolveFile, findFiles, isClear, parseQuery, appRoots, set
 const windows = require('./src/windows');
 const { correctNames, knownNames } = require('./src/names');
 const act = require('./src/act');
+const textMode = require('./src/textmode');
 const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
@@ -80,6 +81,7 @@ function createWindow() {
       shortcut: '⌘⇧Space',
       wakeWord: cfg.wakeWord,
       wakeEnabled: wakeOn(),
+      micOff: Boolean(typed),
       agents: rendererInfo(cfg),
       agent,
     });
@@ -211,7 +213,8 @@ function splitWake(text) {
 }
 const stripWake = (text) => splitWake(text).rest;
 
-ipcMain.handle('ask', async (_e, rawText, who) => {
+ipcMain.handle('ask', (_e, rawText, who) => handleAsk(rawText, who));
+async function handleAsk(rawText, who) {
   try {
     const { agent: named, rest } = splitWake(rawText);
     setAgent(named || who);
@@ -225,7 +228,7 @@ ipcMain.handle('ask', async (_e, rawText, who) => {
     console.error('[ask]', err);
     return { ok: false, reason: 'error', say: persona(agent, cfg).s('Something went wrong{sir}. Try again.') };
   }
-});
+}
 
 // Scan everything on screen for a request, or a ready-made reply explaining why not.
 async function scanForAsk() {
@@ -462,7 +465,12 @@ ipcMain.handle('confirm', async (_e, rawText) => {
     const again = () => (agent === 'jarvis' ? askJarvis(text) : ask(text));
     if (!pending) return again();
     const t = text.toLowerCase();
-    if (/^(no|nope|nah|not really|not quite|wrong|neither)\b/.test(t)) {
+    const no = /^(no|nope|nah|not really|not quite|wrong|neither)\b[\s,.!-]*/.exec(t);
+    if (no) {
+      // "No, just get the application running": the rest is the real request.
+      const rest = text.slice(no[0].length).replace(/^just\s+/i, '').trim();
+      if (/[a-z]{3}/i.test(rest)) return agent === 'jarvis' ? askJarvis(rest) : ask(rest);
+      if (pending.agent === 'jarvis' && Guide.available(cfg)) return beginFreestyle(pending.text);
       return { ok: false, reason: 'not-learned', say: pending.agent === 'jarvis' ? persona('jarvis', cfg).s("Then I'm afraid I haven't been taught that one{sir}.") : "Sorry, I can't do that one yet." };
     }
     if (/^(yes|yeah|yep|yup|sure|correct|right|exactly|that'?s (it|right)|it is|i do|please|ok(ay)?)\b/.test(t)) {
@@ -511,7 +519,7 @@ async function beginSkill(id, text) {
   startInputHook();
 
   // Say every line once in the background so the voice is instant when needed.
-  if (cfg.elevenLabs.apiKey) {
+  if (cfg.elevenLabs.apiKey && cfg.voiceEnabled) {
     (async () => {
       for (const line of r.lines()) await voice.synthesize(line, cfg, 'happy').catch(() => {});
     })();
@@ -659,6 +667,8 @@ const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|t
 const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
 // Words that say "a file": an extension, or file-ish nouns.
 const FILEISH = /\.\w{1,5}\b|\b(file|folder|document|doc|readme|pdf|spreadsheet|sheet|deck|slides|presentation|screenshot|photo|image|video|notes?)\b/i;
+// "…and then run it", "…and use it to…": a second job after the first.
+const MORE_TO_DO = /\b(and then|then (?:use|run|put|start|get|do|make|send|fill|type|click|copy)|after that|and (?:use|run|put|start|get|make|send|fill|type|copy|follow|install|set)\b)/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
 // "Switch to the budget spreadsheet": an open window or tab, brought to the front.
 const SWITCH_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:switch(?: back)? to|go(?: back)? to|bring (?:up|back)|focus(?: on)?|jump to|take me to|show me|get me|pull up|flip to|change to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:window|tab))?(?:\s+for me)?(?:\s+please)?$/i;
@@ -738,10 +748,13 @@ async function askJarvis(raw) {
     return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me do that{sir}. Check Accessibility and Automation in Privacy and Security.") };
   }
 
+  // Quick routes are for one thing ("open the README"). "Read the README and
+  // then run it" is a task with more to it: that's for the best-effort path.
+  const moreToDo = MORE_TO_DO.test(text);
   // Something already open beats opening it again.
-  const find = FIND_RE.exec(text);
-  const sw = !find && SWITCH_RE.exec(text);
-  const open = !find && !sw && OPEN_RE.exec(text);
+  const find = !moreToDo && FIND_RE.exec(text);
+  const sw = !moreToDo && !find && SWITCH_RE.exec(text);
+  const open = !moreToDo && !find && !sw && OPEN_RE.exec(text);
   // "Find the window I had the meeting open in" is about what's open, not files.
   if (find && /\b(window|tab|had\b.*\bopen|was\b.*\bopen|meeting|call)\b/i.test(find[1])) {
     const res = await switchToWindow(find[1], p, { eager: true });
@@ -762,7 +775,7 @@ async function askJarvis(raw) {
   }
   // "Could you please just open the README.md for PianoScribe": a file asked
   // for mid-sentence still takes the quick route, no Claude needed.
-  const late = !find && !sw && !open && /\b(open|pull up|bring up)\s+(?:up\s+)?(.+)$/i.exec(text);
+  const late = !moreToDo && !find && !sw && !open && /\b(open|pull up|bring up)\s+(?:up\s+)?(.+)$/i.exec(text);
   if (late && FILEISH.test(late[2]) && !UI_WORDS.test(late[2])) {
     const res = await openFileRequest(late[2].replace(/\s+(?:for me|please)$/i, ''), p);
     if (res) return res;
@@ -777,13 +790,9 @@ async function askJarvis(raw) {
     } catch (err) {
       console.error('[jarvis] skill lookup', err.message);
     }
-    if (found && found.id) {
-      if (found.match === 'maybe') {
-        pendingClarify = { id: found.id, text, at: Date.now(), agent: 'jarvis' };
-        return { ok: true, clarify: true, question: found.question };
-      }
-      return beginJarvis(found.id);
-    }
+    // Only a clear match runs a learned skill. A "maybe" isn't worth a
+    // question: he has a go at what was actually asked instead.
+    if (found && found.id && found.match !== 'maybe') return beginJarvis(found.id);
   }
 
   const { scan, reply } = await looking;
@@ -830,7 +839,7 @@ function jarvisEmitter(getRun) {
   return (ev) => {
     if (!jarvisRun || jarvisRun.run !== getRun() || !win) return;
     if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
-    else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
+    else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0, quiet: Boolean(ev.quiet) });
   };
 }
 
@@ -1130,6 +1139,7 @@ async function captureFrame(dir, ev) {
 
 // Show a question in the bubble and wait for the typed answer ('' if skipped).
 function askUser(text, phase) {
+  if (typed) return typed.askUser(text, phase);
   const id = ++questionSeq;
   return new Promise((resolve) => {
     answerWaiters.set(id, resolve);
@@ -1428,7 +1438,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // One buddy at a time: launching it again just wakes the running one up.
-const firstInstance = app.requestSingleInstanceLock();
+// Typed mode can run alongside the normal app, for testing.
+const firstInstance = textMode.enabled() || app.requestSingleInstanceLock();
 if (!firstInstance) {
   console.log('Friday is already running. Press ⌘⇧Space to talk to it, or quit it from the 👀 menu first.');
   app.exit(0);
@@ -1438,6 +1449,7 @@ if (!firstInstance) {
 
 if (firstInstance) app.whenReady().then(() => {
   cfg = loadConfig(app.getPath('userData'));
+  if (textMode.enabled()) startTextMode();
   setPicksFile(path.join(app.getPath('userData'), 'file-picks.json'));
   console.log('[config] loaded from', cfg.loadedFrom.length ? cfg.loadedFrom.join(', ') : '(no .env found)');
   console.log('[config] guide:', Guide.available(cfg) ? 'on (Claude)' : 'off (no ANTHROPIC_API_KEY)');
@@ -1460,6 +1472,15 @@ if (firstInstance) app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
   createWindow();
   createTray();
+  if (typed) {
+    // Print what the orb would say, and start reading requests once it's up.
+    const send = win.webContents.send.bind(win.webContents);
+    win.webContents.send = (channel, payload) => {
+      textMode.logSend(channel, payload);
+      send(channel, payload);
+    };
+    win.webContents.once('did-finish-load', () => setTimeout(() => typed.run(), 300));
+  }
 
   if (!globalShortcut.register(ASK_SHORTCUT, () => listen('ask'))) {
     console.warn(`[shortcut] ${ASK_SHORTCUT} is taken by another app; use the menu bar 👀 instead.`);
@@ -1469,6 +1490,32 @@ if (firstInstance) app.whenReady().then(() => {
     if (win) win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
   });
 });
+
+// ---------- typed, silent mode (src/textmode.js) ----------
+
+let typed = null;
+function startTextMode() {
+  // No voice, no microphone: nothing goes to ElevenLabs.
+  cfg.voiceEnabled = false;
+  cfg.wakeEnabled = false;
+  wakeEnabled = false;
+  typed = textMode.createTextMode({
+    handleAsk: (text) => handleAsk(text, 'jarvis'),
+    busy: () => Boolean(jarvisRun),
+    quit: () => app.quit(),
+  });
+  if (textMode.dryRun()) {
+    // Look but don't touch: anything that would change the screen is only logged.
+    const dry = (what) => async (...args) => console.log(`[dry] ${what}`, ...args.map((a) => (typeof a === 'object' ? JSON.stringify(a).slice(0, 120) : a)));
+    for (const k of ['click', 'type', 'keys', 'selectAll', 'escape', 'scroll']) act[k] = dry(k);
+    shell.openPath = async (p) => (console.log('[dry] open', p), '');
+    shell.openExternal = dry('open url');
+    shell.showItemInFolder = dry('show in Finder');
+    windows.bringToFront = dry('bring to front');
+    hands.openApp = async (name) => (console.log('[dry] open app', name), true);
+  }
+  console.log(`[text] typed mode${textMode.dryRun() ? ', dry run' : ''}: voice and mic off`);
+}
 
 // Safety net: log unexpected errors instead of crashing the whole app.
 process.on('uncaughtException', (err) => console.error('[main] uncaught', err));

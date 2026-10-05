@@ -739,8 +739,8 @@ class JarvisFreestyle extends JarvisRun {
       }
       if (r.status === 'needs_teaching') {
         this.running = false;
-        const lead = this.executing ? this.s("I'll stop there{sir}. ") : this.s("I'm afraid I haven't been taught that one{sir}. ");
-        return { status: 'needs_teaching', say: `${lead}${r.say} ${this.s('Once Friday has learned it, I can do it for you.')}`.replace(/\s+/g, ' ').trim() };
+        const lead = this.executing ? this.s("I'll stop there{sir}. ") : this.s("I haven't been taught that{sir}. ");
+        return { status: 'needs_teaching', say: `${lead}${r.say}`.replace(/\s+/g, ' ').trim() };
       }
       if (r.status === 'need_info') {
         const answer = await this.ask(r.say, 'jarvis-input');
@@ -760,7 +760,9 @@ class JarvisFreestyle extends JarvisRun {
         if (r.summary) this.emit({ type: 'say', say: r.summary });
       }
 
-      if (r.say) this.emit({ type: 'step', say: r.say, stepNo: step + 1, totalSteps: 0 });
+      // Steps show on screen but aren't spoken: he talks at the start, when he
+      // needs something, and when he's done.
+      if (r.say) this.emit({ type: 'step', say: r.say, stepNo: step + 1, totalSteps: 0, quiet: true });
       try {
         note = await this.doStep(r);
         failures = 0;

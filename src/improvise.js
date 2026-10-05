@@ -70,7 +70,13 @@ Reply with status "step" and the single next action:
 Prefer these direct actions (open_file, read_file, open_url, open_app, switch_to) over clicking through menus whenever they do the job: they're faster and more reliable.
 You never type or press keys in a terminal app, and never run shell commands. If a task needs commands run (setting up or starting a software project), read the instructions with read_file, then finish with status "done" and say exactly which commands the user should run, and in which folder, briefly.
 - "wait": give a page or app a moment to load.
-say: a few words in character on what you're doing ("Opening Safari."), spoken aloud, no markdown. On your first reply, summary is one sentence in character saying what you'll attempt; otherwise "".`;
+
+Talk as little as possible: the user wants it done, not described.
+- say: at most 6 words on the step ("Reading the README."). It's shown on screen, not spoken.
+- summary (first reply only, otherwise ""): at most 10 words, spoken ("Opening the README, sir.").
+- With "done", say is the result the user needs, as short as it can be; for commands, just the folder and the commands ("In Documents/pianoscribe, run ./run.sh.").
+- With "needs_teaching" or "need_info", say is one short sentence.
+Act, don't ask: if the request names something (a project, a file), find it with read_file or open_file rather than asking where it is.`;
 }
 
 const SCHEMA = {

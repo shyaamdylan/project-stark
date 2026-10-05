@@ -731,7 +731,7 @@ window.buddy.on('jarvis-step', (step) =>
       guideCount.textContent = step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`;
       guideBar.classList.remove('hidden');
     }
-    if (step.say) say(step.say, { mood: 'happy', hold: 60000 });
+    if (step.say) say(step.say, { mood: 'happy', hold: 60000, speak: !step.quiet });
     if (step.rect) await pointTo(step.rect, step.label, Infinity);
   })
 );
@@ -992,7 +992,8 @@ async function heard(wav, clip = {}) {
 }
 
 function updateMic() {
-  const want = state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled;
+  // Typed mode (npm run text) never opens the microphone.
+  const want = !state.micOff && (state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled);
   if (want && !Mic.isOn()) {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
@@ -1181,6 +1182,7 @@ function switchAgent(id) {
 }
 
 window.buddy.on('config', (c) => {
+  state.micOff = Boolean(c.micOff);
   state.voice = c.voice;
   state.agents = c.agents || {};
   applyAgent(c.agent || 'friday', { show: false });

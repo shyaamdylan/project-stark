@@ -119,3 +119,20 @@ test('reading files: text and folders yes; secrets, hidden and outside no', () =
   assert.equal(readTextFile(path.join(home, '.ssh/id_ed25519'), { home }).why, 'hidden');
   assert.equal(readTextFile('/etc/hosts', { home }).why, 'outside');
 });
+
+test('with Spotlight off, the folders are walked: words can name the file or its folder', async () => {
+  const { walkFind } = require('../src/files');
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'walk-')));
+  const proj = path.join(home, 'Documents', 'PianoScribe');
+  fs.mkdirSync(path.join(proj, 'node_modules', 'x'), { recursive: true });
+  fs.mkdirSync(path.join(home, '.hidden'), { recursive: true });
+  fs.writeFileSync(path.join(proj, 'README.md'), '# hi');
+  fs.writeFileSync(path.join(proj, 'node_modules', 'x', 'README.md'), '');
+  fs.writeFileSync(path.join(home, '.hidden', 'README.md'), '');
+  const silent = async () => []; // Spotlight returning nothing
+  const run = async (args, limit) => ((await silent()).length ? [] : walkFind(args, limit));
+  const found = await findFiles('the README for PianoScribe', { home, run });
+  assert.deepEqual(found.map((f) => path.relative(home, f.path)), [path.join('Documents', 'PianoScribe', 'README.md')]);
+  // Only plain name queries are walked; content or date queries aren't guessed at.
+  assert.deepEqual(await walkFind(['-onlyin', home, 'kMDItemFSContentChangeDate >= $time.today(-2)']), []);
+});
