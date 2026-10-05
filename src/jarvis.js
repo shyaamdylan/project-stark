@@ -223,7 +223,8 @@ class JarvisRun {
   //   s(line)   fills in the form of address ("Right away{sir}.")
   //   scan()    front-window scan
   //   act       { click(rect), type(text), keys(spec), selectAll(), escape(),
-  //               openUrl(url), openApp(name) -> true if found }
+  //               openUrl(url), openApp(name) -> true if found,
+  //               openFile(query) -> name or null, switchTo(query) -> description or null }
   //   ask(text, phase) -> the user's answer ('' if skipped or cancelled)
   //   emit(ev)  { type: 'step' | 'point' | 'say', say, stepNo, totalSteps, target }
   //   wait(ms)  (tests pass a fast one, and a short findMs)
@@ -766,6 +767,26 @@ class JarvisFreestyle extends JarvisRun {
         if (!ok) throw new Error(`there's no app called "${r.text}" in Applications`);
         await this.wait(2000);
         return `Done: opened ${r.text}.`;
+      }
+      case 'open_file': {
+        let name = null;
+        await this.doAct(async () => {
+          name = this.act.openFile ? await this.act.openFile(r.text || '') : null;
+        });
+        this.record({ kind: 'go', detail: name ? `opened file ${name}` : `no file for "${r.text}"` });
+        if (!name) throw new Error(`no file matching "${r.text}" in the home folder`);
+        await this.wait(2000);
+        return `Done: opened the file ${name}.`;
+      }
+      case 'switch_to': {
+        let which = null;
+        await this.doAct(async () => {
+          which = this.act.switchTo ? await this.act.switchTo(r.text || '') : null;
+        });
+        this.record({ kind: 'go', detail: which ? `switched to ${which}` : `nothing open like "${r.text}"` });
+        if (!which) throw new Error(`nothing open matches "${r.text}"`);
+        await this.wait(SETTLE_MS);
+        return `Done: brought ${which} to the front.`;
       }
       case 'wait':
         await this.wait(2000);

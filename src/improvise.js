@@ -64,6 +64,8 @@ Reply with status "step" and the single next action:
 - "keys": text is the shortcut with ⌘ ⌃ ⌥ ⇧ then the key name, e.g. "⌘S", "⇧⌘N", "Enter", "Escape", "Tab", "ArrowDown".
 - "open_url": text is a web address. Prefer this to clicking through menus when you know the page.
 - "open_app": text is the app's name as it appears in Applications.
+- "open_file": text is a short description of a file to find and open ("Q3 budget spreadsheet").
+- "switch_to": text names an already-open window or browser tab to bring to the front ("budget spreadsheet", "YouTube").
 - "wait": give a page or app a moment to load.
 say: a few words in character on what you're doing ("Opening Safari."), spoken aloud, no markdown. On your first reply, summary is one sentence in character saying what you'll attempt; otherwise "".`;
 }
@@ -77,7 +79,7 @@ const SCHEMA = {
     action: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'wait', 'none'] },
+        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'open_file', 'switch_to', 'wait', 'none'] },
         target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
         text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       },

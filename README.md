@@ -70,8 +70,16 @@ the orb turns gold. "Hey Friday" switches back.
   waits for your **yes**. Then he does it: the orb's cursor flies to each button just before he
   clicks it, so you can see exactly what he's doing. Or open the **Skills Hub** and press
   **Have Jarvis do it**.
-- **Open files and apps:** "Jarvis, open the Q3 budget spreadsheet", "open Safari". He finds it
-  with Spotlight; if a few files match, he asks which one.
+- **Find and open any file:** "open the Q3 budget spreadsheet", "the PDF I downloaded yesterday",
+  "my latest screenshot", "the budget on my desktop in Numbers", "open my downloads". He searches
+  names first, then contents, then (with Claude) other names it might have ("tax return" →
+  "1040"), and ranks by how well it matches and how recently you used it. If a few are equally
+  likely he asks which, and remembers your pick next time. "Where's my passport scan?" shows it in
+  Finder instead.
+- **Switch between windows:** "switch to the budget spreadsheet", "go back to YouTube", "find the
+  window I had the meeting open in". He looks through every open window (minimised ones too) and
+  Safari / Chrome / Brave / Edge / Arc tabs, and brings the right one to the front. Descriptions
+  rather than names go to Claude. Asking to open something that's already open just switches to it.
 - **Press a button:** "Jarvis, click Share."
 - **The basics need no lesson:** "go to youtube.com", "search for flights to Rome", "type hello
   everyone", "press command S".

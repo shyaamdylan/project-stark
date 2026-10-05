@@ -8,6 +8,7 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu, systemPreferences, shell, nativeImage, desktopCapturer, session, protocol } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
 const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp, screenFingerprint } = require('./src/finder');
@@ -16,7 +17,8 @@ const { Replay, buildActions } = require('./src/replay');
 const { JarvisRun, JarvisFreestyle, planRun, riskOf, isYes } = require('./src/jarvis');
 const { Improviser, ImprovisedWalkthrough } = require('./src/improvise');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
-const { findFiles } = require('./src/files');
+const { findFiles, isClear, parseQuery, appRoots, setPicksFile, rememberPick, makeRephrase } = require('./src/files');
+const windows = require('./src/windows');
 const act = require('./src/act');
 const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
@@ -608,6 +610,21 @@ const hands = {
     await shell.openExternal(safe);
     console.log(`[jarvis] opened ${safe}`);
   },
+  // Best matching file, opened with its usual app (no questions: he's mid-task).
+  openFile: async (query) => {
+    const [f] = await findFiles(query, { limit: 1 });
+    if (!f || f.blocked) return null;
+    const err = await shell.openPath(f.path);
+    console.log(`[jarvis] opened ${f.path}${err ? ` (failed: ${err})` : ''}`);
+    return err ? null : f.name;
+  },
+  // Best matching open window or tab, brought to the front.
+  switchTo: async (query) => {
+    const [best] = windows.rankOpen(query, await windows.listOpen());
+    if (!best || best.score < 0.6) return null;
+    await windows.bringToFront(best.item);
+    return windows.describe(best.item);
+  },
   // Only apps installed in the Applications folders.
   openApp: async (name) => {
     const file = `${path.basename(String(name)).replace(/\.app$/i, '')}.app`;
@@ -625,6 +642,10 @@ const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|t
 // "open the File menu" is about the screen, not a file.
 const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
+// "Switch to the budget spreadsheet": an open window or tab, brought to the front.
+const SWITCH_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:switch(?: back)? to|go(?: back)? to|bring (?:up|back)|focus(?: on)?|jump to|take me to|show me|get me|pull up|flip to|change to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:window|tab))?(?:\s+for me)?(?:\s+please)?$/i;
+// "Where's my passport scan": find the file and show it in Finder.
+const FIND_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:find|locate|where(?:'s| is| are)|where did i (?:put|save)|show me where)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:is|are))?(?:\s+for me)?(?:\s+please)?$/i;
 
 // The basics need no lesson: websites, web searches, typing and key presses.
 const URL_RE = /^(?:please\s+)?(?:go to|open|visit|pull up|bring up|navigate to|load)\s+((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)(?:\s+please)?$/i;
@@ -686,9 +707,25 @@ async function askJarvis(text) {
     return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me do that{sir}. Check Accessibility and Automation in Privacy and Security.") };
   }
 
-  const open = OPEN_RE.exec(text);
-  if (open && !UI_WORDS.test(open[1])) {
-    const res = await openFileRequest(open[1], p);
+  // Something already open beats opening it again.
+  const find = FIND_RE.exec(text);
+  const sw = !find && SWITCH_RE.exec(text);
+  const open = !find && !sw && OPEN_RE.exec(text);
+  // "Find the window I had the meeting open in" is about what's open, not files.
+  if (find && /\b(window|tab|had\b.*\bopen|was\b.*\bopen|meeting|call)\b/i.test(find[1])) {
+    const res = await switchToWindow(find[1], p, { eager: true });
+    if (res) return res;
+  }
+  if (sw || open) {
+    const res = await switchToWindow((sw || open)[1], p, { eager: Boolean(sw) });
+    if (res) return res;
+  }
+  if ((open || sw) && !UI_WORDS.test((open || sw)[1])) {
+    const res = await openFileRequest((open || sw)[1], p);
+    if (res) return res;
+  }
+  if (find && !UI_WORDS.test(find[1])) {
+    const res = await openFileRequest(find[1], p, { reveal: true });
     if (res) return res;
   }
 
@@ -774,31 +811,91 @@ async function jarvisClick(el, p) {
   return { ok: true, sayOnly: true, home: true, say: p.s(`Done{sir}.`) };
 }
 
-// "Open the Q3 report": find it with Spotlight and open it in its usual app.
-// Returns null if nothing matches, so the request can be tried as something else.
-async function openFileRequest(what, p) {
-  let found;
+// "Which one: 1, …; 2, …?" -> the chosen item, or null.
+async function pickOne(items, label, p, question) {
+  const answer = await askUser(p.s(`${question} ${items.map((x, i) => `${i + 1}, ${label(x)}`).join('; ')}. Which one{sir}?`), 'jarvis-input');
+  if (!answer) return null;
+  const n = { one: 1, first: 1, '1': 1, two: 2, second: 2, '2': 2, three: 3, third: 3, '3': 3 }[(/\b(one|two|three|first|second|third|[123])\b/i.exec(answer) || [])[1]?.toLowerCase()];
+  if (n) return items[n - 1] || null;
+  const best = findBest(answer, items.map((x, i) => ({ label: label(x), role: 'AXButton', i })));
+  return best.match ? items[best.match.i] : null;
+}
+
+// "Switch to the budget spreadsheet": bring an open window or browser tab to the
+// front. Returns null when nothing open matches well enough, so the request can
+// be tried as a file. `eager` (an explicit "switch to") accepts looser matches.
+async function switchToWindow(what, p, { eager = false } = {}) {
+  let open;
   try {
-    found = await findFiles(what);
+    open = await windows.listOpen();
+  } catch (err) {
+    console.error('[jarvis] windows', err.message);
+    return null;
+  }
+  const ranked = windows.rankOpen(what, open);
+  const bar = eager ? 0.6 : 0.85;
+  const good = ranked.filter((x) => x.score >= bar);
+  console.log(`[jarvis] switch "${what}" →`, ranked.slice(0, 3).map((x) => `${windows.describe(x.item)} (${x.score.toFixed(2)})`).join(', ') || 'no name matches');
+  let choices = good.length ? good.filter((x) => x.score >= good[0].score - 0.05).slice(0, 3).map((x) => x.item) : [];
+
+  // Described rather than named ("the window I had the meeting in"): Claude reads what's open.
+  const described = eager || /\b(had|was|were|where|with|from|about)\b/i.test(what);
+  if (!choices.length && described && Guide.available(cfg)) {
+    try {
+      const r = await windows.pickWithClaude(cfg.anthropicApiKey, what, open);
+      console.log(`[jarvis] switch "${what}" (Claude) → ${r.match}:`, r.items.map(windows.describe).join(', '));
+      choices = r.items;
+    } catch (err) {
+      console.error('[jarvis] window pick', err.message);
+    }
+  }
+  if (!choices.length) return null;
+  let pick = choices[0];
+  if (choices.length > 1) {
+    pick = await pickOne(choices, windows.describe, p, `${choices.length} of those are open:`);
+    if (!pick) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
+  }
+  try {
+    await windows.bringToFront(pick);
+  } catch (err) {
+    console.error('[jarvis] switch', err.message);
+    return { ok: false, reason: 'error', say: p.s(`I couldn't bring ${windows.describe(pick)} forward{sir}.`) };
+  }
+  console.log(`[jarvis] brought forward: ${windows.describe(pick)}`);
+  return { ok: true, sayOnly: true, say: p.s(`${windows.describe(pick)[0].toUpperCase()}${windows.describe(pick).slice(1)}{sir}.`) };
+}
+
+// Where a file lives, said out loud: "in Documents", "in Projects inside Documents".
+function whereIs(file) {
+  const home = app.getPath('home');
+  const rel = path.relative(home, path.dirname(file));
+  if (!rel) return 'in your home folder';
+  const parts = rel.split(path.sep).filter((x) => x !== 'Library' && x !== 'Mobile Documents' && x !== 'com~apple~CloudDocs');
+  if (!parts.length) return 'in iCloud Drive';
+  return parts.length === 1 ? `in ${parts[0]}` : `in ${parts[parts.length - 1]}, inside ${parts[0]}`;
+}
+
+// "Open the Q3 report": find it with Spotlight and open it in its usual app (or
+// the one named: "…in Preview"). With reveal, show it in Finder instead.
+// Returns null if nothing matches, so the request can be tried as something else.
+async function openFileRequest(what, p, { reveal = false } = {}) {
+  let found;
+  const started = Date.now();
+  try {
+    found = await findFiles(what, { rephrase: Guide.available(cfg) ? makeRephrase(cfg.anthropicApiKey) : null });
   } catch (err) {
     console.error('[jarvis] file search', err.message);
     return null;
   }
-  console.log(`[jarvis] open "${what}" →`, found.map((f) => `${f.name} (${f.score.toFixed(2)}${f.blocked ? `, ${f.blocked}` : ''})`).join(', ') || 'nothing');
+  console.log(`[jarvis] ${reveal ? 'find' : 'open'} "${what}" (${Date.now() - started} ms) →`, found.map((f) => `${f.name} (${f.score.toFixed(2)}${f.remembered ? ', remembered' : ''}${f.blocked ? `, ${f.blocked}` : ''})`).join(', ') || 'nothing');
   if (!found.length) return null;
 
   let pick = found[0];
-  const close = found.filter((f) => f.score >= pick.score - 0.05);
-  if (close.length > 1) {
-    const names = close.slice(0, 3);
-    const answer = await askUser(
-      p.s(`I found ${names.length} likely candidates: ${names.map((f, i) => `${i + 1}, ${f.name}`).join('; ')}. Which one{sir}?`),
-      'jarvis-input'
-    );
-    if (!answer) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
-    const n = { one: 1, first: 1, '1': 1, two: 2, second: 2, '2': 2, three: 3, third: 3, '3': 3 }[(/\b(one|two|three|first|second|third|[123])\b/i.exec(answer) || [])[1]?.toLowerCase()];
-    pick = n ? names[n - 1] : findBest(answer, names.map((f) => ({ ...f, label: f.name, role: 'AXButton' }))).match;
-    if (!pick) return { ok: false, reason: 'not-found', say: p.s("I'm afraid I didn't catch which one{sir}.") };
+  if (!isClear(found, what)) {
+    const close = found.filter((f) => f.score >= found[0].score - 0.1).slice(0, 3);
+    pick = await pickOne(close, (f) => `${f.name} ${whereIs(f.path)}`, p, `I found ${close.length} likely candidates:`);
+    if (!pick) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
+    rememberPick(what, pick.path); // next time, straight there
   }
 
   if (pick.blocked) {
@@ -808,13 +905,24 @@ async function openFileRequest(what, p) {
     console.log(`[jarvis] refused to open ${pick.path} (${pick.blocked})`);
     return { ok: false, reason: 'blocked', say: p.s(why) };
   }
-  const err = await shell.openPath(pick.path);
+  const nice = pick.name.replace(/\.[^.]+$/, '');
+  if (reveal) {
+    shell.showItemInFolder(pick.path);
+    console.log(`[jarvis] showed ${pick.path}`);
+    return { ok: true, sayOnly: true, say: p.s(`${nice} is ${whereIs(pick.path)}{sir}. I've shown it to you in Finder.`) };
+  }
+  // "…in Preview": only apps from the Applications folders.
+  const withApp = parseQuery(what).withApp;
+  const appPath = withApp && appRoots(app.getPath('home')).map((d) => path.join(d, `${path.basename(withApp)}.app`)).find((x) => fs.existsSync(x));
+  const err = appPath
+    ? await new Promise((resolve) => execFile('/usr/bin/open', ['-a', appPath, pick.path], (e) => resolve(e ? e.message : '')))
+    : await shell.openPath(pick.path);
   if (err) {
     console.error('[jarvis] open', pick.path, err);
     return { ok: false, reason: 'error', say: p.s(`I couldn't open "${pick.name}"{sir}.`) };
   }
-  console.log(`[jarvis] opened ${pick.path}`);
-  return { ok: true, sayOnly: true, say: p.s(`Opening ${pick.name.replace(/\.[^.]+$/, '')}{sir}.`) };
+  console.log(`[jarvis] opened ${pick.path}${appPath ? ` in ${appPath}` : ''}`);
+  return { ok: true, sayOnly: true, say: p.s(`Opening ${nice}${appPath ? ` in ${withApp}` : ''}{sir}.`) };
 }
 
 // Jarvis's plan for a skill (which values to ask for, what to confirm), made once.
@@ -1282,6 +1390,7 @@ if (!firstInstance) {
 
 if (firstInstance) app.whenReady().then(() => {
   cfg = loadConfig(app.getPath('userData'));
+  setPicksFile(path.join(app.getPath('userData'), 'file-picks.json'));
   console.log('[config] loaded from', cfg.loadedFrom.length ? cfg.loadedFrom.join(', ') : '(no .env found)');
   console.log('[config] guide:', Guide.available(cfg) ? 'on (Claude)' : 'off (no ANTHROPIC_API_KEY)');
   console.log('[config] voice:', cfg.voiceEnabled ? (cfg.elevenLabs.apiKey ? 'ElevenLabs' : 'system fallback (no ELEVENLABS_API_KEY)') : 'off');
