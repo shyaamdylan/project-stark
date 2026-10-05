@@ -450,9 +450,13 @@ function run(argv) {
 
   var fw = safe(function () { return getAttr(front.el, 'AXFocusedWindow'); }, null);
   var fwn = isNil(fw) ? null : node(fw);
+  // Where the keyboard is: the field they're typing in and what it holds.
+  var fe = safe(function () { return getAttr(front.el, 'AXFocusedUIElement'); }, null);
+  var fen = isNil(fe) ? null : node(fe);
+  var focused = fen ? { role: fen.role, label: str(fen.title || fen.desc || fen.placeholder || fen.help), value: fen.value ? str(fen.value) : '' } : null;
 
   return JSON.stringify({
-    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', apps: apps.map(function (a) { return a.name; }),
+    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', focused: focused, apps: apps.map(function (a) { return a.name; }),
     statusPids: statusPids, visited: visited, truncated: truncated, elements: elements,
   });
 }

@@ -41,6 +41,7 @@ function select(id) {
   const bits = [fmtDate(current.createdAt)];
   if (current.page) bits.push(`${current.steps} steps`, `${current.judgments} judgment calls`, `${current.guardrails} guardrails`);
   if (current.confirmed) bits.push('confirmed by the expert');
+  if (current.tidied) bits.push('tidied up');
   $('meta').textContent = bits.join(' · ');
   $('open').disabled = !current.page;
   $('run').disabled = !current.page;

@@ -24,6 +24,17 @@ today's bug report. When something goes wrong:
   code). Give him that information, rather than another rule about a particular scenario.
 - **Add a test for the general behaviour** with made-up names, not the user's real files.
 
+## How Friday teaches
+
+A lesson is `src/tutor.js`: the replay (`src/replay.js`) moves through the Work Map instantly
+while the user is on track; the tutor (Claude) is only asked when they go off it, go quiet,
+can't find something, or say something. `src/observe.js` gives it the facts: what they clicked,
+typed, and which window and field they're in, from the accessibility scan (no screenshots). When
+she gets something wrong, give her more of those facts rather than another rule.
+
+Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
+make it run per lesson.
+
 ## Testing without voice
 
 Don't spend ElevenLabs credits testing. Use typed mode (voice and mic off, output printed):

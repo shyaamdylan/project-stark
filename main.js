@@ -13,7 +13,8 @@ const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
 const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp, screenFingerprint } = require('./src/finder');
 const { Guide, findSkill, planReplay, locateTarget } = require('./src/guide');
-const { Replay, buildActions } = require('./src/replay');
+const { buildActions } = require('./src/replay');
+const { Tutor, Lesson } = require('./src/tutor');
 const { JarvisRun, JarvisFreestyle, planRun, riskOf, isYes } = require('./src/jarvis');
 const { Improviser, ImprovisedWalkthrough } = require('./src/improvise');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
@@ -85,6 +86,8 @@ function createWindow() {
       micOff: Boolean(typed),
       agents: rendererInfo(cfg),
       agent,
+      // Speech-to-text needs ElevenLabs; without it, conversations are typed.
+      canHear: Boolean(cfg.elevenLabs.apiKey),
     });
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
       win.webContents.send('say', {
@@ -375,10 +378,26 @@ async function replayPlan(id, skill) {
 
 // Skills taught before the tidy-up pass existed (or under older rules) are
 // tidied the first time they're used. The original stays as workmap.original.json.
-async function ensureRefined(id, skill) {
-  if ((skill.map.refined || 0) >= REFINE_VERSION || !Guide.available(cfg)) return skill;
+//
+// It happens once per skill: the tidied map is saved with its version, and a
+// skill that's already tidy is never sent again. Untidied skills are done in
+// the background at startup (tidyAllSkills) so a run doesn't wait for it; a
+// run that does catch one mid-tidy waits for that same tidy-up rather than
+// starting another. A failed tidy-up isn't retried until the app restarts.
+const tidying = new Map(); // id -> promise of the tidied skill
+const tidyFailed = new Set(); // ids that failed this session
+
+function ensureRefined(id, skill, { quiet = false } = {}) {
+  if ((skill.map.refined || 0) >= REFINE_VERSION || !Guide.available(cfg) || tidyFailed.has(id)) return Promise.resolve(skill);
+  if (tidying.has(id)) return tidying.get(id);
+  const job = refineSkill(id, skill, quiet).finally(() => tidying.delete(id));
+  tidying.set(id, job);
+  return job;
+}
+
+async function refineSkill(id, skill, quiet) {
   const dir = skillDir(id);
-  if (win) win.webContents.send('say', { text: 'Tidying up that lesson first…', speak: false });
+  if (win && !quiet) win.webContents.send('say', { text: 'Tidying up that lesson first…', speak: false });
   try {
     const map = await new Apprentice(cfg.anthropicApiKey).refineMap({
       title: skill.session.title || skill.map.title,
@@ -396,7 +415,16 @@ async function ensureRefined(id, skill) {
     return { ...skill, map };
   } catch (err) {
     console.error('[skills] tidy up', err.message);
+    tidyFailed.add(id);
     return skill;
+  }
+}
+
+// Tidy any skill taught before the tidy-up existed, one at a time, in the background.
+async function tidyAllSkills() {
+  for (const s of learnedSkills()) {
+    const skill = loadSkill(s.id);
+    if (skill && (skill.map.refined || 0) < REFINE_VERSION) await ensureRefined(s.id, skill, { quiet: true });
   }
 }
 
@@ -415,6 +443,7 @@ function stepPayload(step) {
     say: step.say,
     note: step.note || '',
     quietMove: Boolean(step.quietMove),
+    chat: Boolean(step.chat), // the tutor talking (an answer, a check-in): the cursor stays put
     stepNo: step.stepNumber || 0,
     totalSteps: step.totalSteps || 0,
     label: step.target ? step.target.label : null,
@@ -497,24 +526,20 @@ async function beginSkill(id, text) {
     console.error('[guide] replay plan', err.message); // fall back to the raw recording
   }
 
-  const claude = new Guide(cfg.anthropicApiKey, skill);
-  let asked = false;
-  const r = new Replay({
+  // A lesson, not a script: the replay moves on instantly while they're on
+  // track; the tutor (Claude) steps in when they go off it, go quiet, or talk.
+  const r = new Lesson({
     skill,
     plan,
     scan: scanFrontWindow,
+    tutor: new Tutor(cfg.anthropicApiKey, skill),
     emit: (step) => {
       if (replay !== r) return;
-      console.log(`[guide] step ${step.stepNumber || '-'}/${step.totalSteps}:`, step.status, step.target ? step.target.label : '', step.say ? `- ${step.say}` : '');
+      console.log(`[lesson] step ${step.stepNumber || '-'}/${step.totalSteps}${step.chat ? ' (tutor)' : ''}:`, step.status, step.target ? step.target.label : '', step.say ? `- ${step.say}` : '');
       win.webContents.send('guide-step', stepPayload(step));
       if (step.status !== 'step') stopGuide();
     },
     thinking: () => win.webContents.send('guide-thinking'),
-    recover: async (note, current) => {
-      const step = asked ? await claude.next(current, note) : await claude.start(text, current, note);
-      asked = true;
-      return step;
-    },
   });
   replay = r;
   startInputHook();
@@ -548,6 +573,17 @@ ipcMain.on('guide-next', () => {
   if (replay) replay.skip();
   if (improv) improv.skip();
 });
+// Said or typed during a lesson: part of the conversation, no "Hey Friday" needed.
+ipcMain.on('guide-say', (_e, text) => guideSay(text));
+function guideSay(text) {
+  const t = tidySpeech(String(text || ''));
+  if (!t) return false;
+  console.log(`[lesson] they said: ${JSON.stringify(t)}`);
+  if (replay) replay.onUserSays(t);
+  else if (improv) improv.onUserSays(t);
+  else return false;
+  return true;
+}
 
 // ---------- best effort: tasks nobody has taught yet ----------
 //
@@ -1344,6 +1380,7 @@ function listSkills() {
         judgments: steps.filter((st) => st.is_judgment).length,
         guardrails: steps.reduce((n, st) => n + st.guardrails.length, 0),
         confirmed: Boolean(map && map.confirmed),
+        tidied: Boolean(map && map.refined),
         page: map && fs.existsSync(page) ? pathToFileURL(page).href : null,
       };
     })
@@ -1504,6 +1541,8 @@ if (firstInstance) app.whenReady().then(() => {
   cfg = loadConfig(app.getPath('userData'));
   if (textMode.enabled()) startTextMode();
   setPicksFile(path.join(app.getPath('userData'), 'file-picks.json'));
+  // Older skills get their one-off tidy-up now, not when someone's waiting for them.
+  setTimeout(() => tidyAllSkills().catch((err) => console.error('[skills] tidy all', err.message)), 8000);
   console.log('[config] loaded from', cfg.loadedFrom.length ? cfg.loadedFrom.join(', ') : '(no .env found)');
   console.log('[config] guide:', Guide.available(cfg) ? 'on (Claude)' : 'off (no ANTHROPIC_API_KEY)');
   console.log('[config] voice:', cfg.voiceEnabled ? (cfg.elevenLabs.apiKey ? 'ElevenLabs' : 'system fallback (no ELEVENLABS_API_KEY)') : 'off');
@@ -1555,6 +1594,7 @@ function startTextMode() {
   typed = textMode.createTextMode({
     handleAsk: (text) => handleAsk(text, 'jarvis'),
     busy: () => Boolean(jarvisRun),
+    lessonSay: (text) => Boolean((replay || improv) && guideSay(text)),
     quit: () => app.quit(),
   });
   if (textMode.dryRun()) {

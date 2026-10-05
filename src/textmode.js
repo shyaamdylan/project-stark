@@ -37,7 +37,8 @@ function logSend(channel, payload) {
 //   handleAsk(text) -> the same reply the orb gets
 //   busy()          true while a Jarvis run is going
 //   quit()
-function createTextMode({ handleAsk, busy, quit }) {
+//   lessonSay(text) -> true if a lesson is running and took the line as part of it
+function createTextMode({ handleAsk, busy, quit, lessonSay = () => false }) {
   const queue = scriptedLines();
   const scripted = queue.length > 0;
   let waiting = null; // resolves the open question with the next line
@@ -94,6 +95,8 @@ function createTextMode({ handleAsk, busy, quit }) {
         w(line);
         continue;
       }
+      // Mid-lesson, a line is something said to Friday, not a new request.
+      if (lessonSay(line)) continue;
       const started = Date.now();
       pending = { done: false };
       const p = pending;

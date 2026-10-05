@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('buddy', {
   promptClosed: () => ipcRenderer.send('prompt-closed'),
   guideNext: () => ipcRenderer.send('guide-next'),
   guideStop: () => ipcRenderer.send('guide-stop'),
+  guideSay: (text) => ipcRenderer.send('guide-say', text),
   teachStart: (title) => ipcRenderer.send('teach-start', title),
   teachFinish: () => ipcRenderer.send('teach-finish'),
   teachAnswer: (id, text) => ipcRenderer.send('teach-answer', { id, text }),

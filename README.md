@@ -118,6 +118,32 @@ Jarvis needs `ANTHROPIC_API_KEY` for tasks (opening files and pressing buttons d
 first time he clicks or types, macOS may ask again for Accessibility and Automation → System
 Events for your terminal app.
 
+### Lessons are a conversation
+
+When Friday teaches a skill, the lesson plan is her structure, but she teaches like a person
+sitting next to you rather than a click-through tutorial:
+
+- **She sees what you do, without screenshots.** She reads the screen through Accessibility
+  (buttons, fields, values, which window, where you're typing) and pairs your clicks and keys with
+  what's under them, so she knows "you clicked Preferences" or "you typed Q3 into Search".
+- **On track, she keeps up instantly.** Do the step and she's onto the next one, no waiting.
+- **Off track, she helps.** "That opened Preferences. Close it, then click Export." Got there
+  another way? She accepts it and carries on.
+- **Your choices count.** Say you'd rather not use a mode she suggested, and she drops the steps
+  that only apply to it instead of describing things you can't see.
+- **Talk to her.** No "Hey Friday" needed during a lesson: ask "why are we doing this?", "how long
+  will this take?", or "I'm not sure how" (she'll point exactly where), or type it in the box under
+  the step. She answers, then brings you back to the goal.
+- **She notices if you've gone quiet** and checks in once ("Still with me?"), without nagging.
+
+### Awake or dormant
+
+The orb shows whether it's listening to you. **Dormant**: dimmer and calm, only listening for
+"Hey Friday" / "Hey Jarvis". **Awake** (during a lesson, a task, a question, or for 20 seconds
+after you've talked to it): a halo breathes around it and a small label under it says
+**Listening**, **Hearing you**, **Thinking…**, **Speaking** or **Working…**. While it's awake,
+just talk; no wake word needed.
+
 ### Things nobody has taught yet
 
 Ask Friday how to do something she hasn't learned ("how do I turn on dark mode?", "open my
@@ -144,8 +170,9 @@ back to you, applies your corrections, then **tidies it up** so anyone can follo
 wherever they start: it drops where you happened to begin (if you were on Facebook and typed the
 real site's address, the lesson just says "open canva.com"), detours and stray clicks, lists
 what the task assumes ("Signed in to Canva") under *Before you start*, and fills obvious gaps
-(marked as added). It never invents reasons or rules. Skills taught before this are tidied the
-first time they're used (the original is kept as `workmap.original.json`). Then it opens the
+(marked as added). It never invents reasons or rules. This happens once per skill: the tidied
+lesson is saved and never re-done. Skills taught before this are tidied once in the background
+when the app starts (the original is kept as `workmap.original.json`). Then it opens the
 **Work Map**: a step-by-step tutorial with
 the screen moment, the decision, your reason in your own words and the guardrails for each
 step. Everything it has learned is in the **Skills Hub** (👀 menu → *Open Skills Hub*):

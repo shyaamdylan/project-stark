@@ -201,6 +201,11 @@ class ImprovisedWalkthrough {
     this.inputAt = Date.now();
   }
 
+  // Something they said or typed mid-walkthrough: answered on the next turn.
+  onUserSays(text) {
+    this.said = String(text || '').trim() || null;
+  }
+
   skip() {
     this.skipped = true;
   }
@@ -240,7 +245,10 @@ class ImprovisedWalkthrough {
         const what = await this.waitForUser();
         if (!this.running) return;
         if (what === 'timeout') return this.end('stuck', "I'll leave you to it. Ask again if you need me.");
-        note = what === 'next' ? 'The user pressed Next: they did that step, or want to move on.' : 'The user did something. Check what changed and give the next step.';
+        if (what === 'said') {
+          note = `The user said: "${this.said}". Answer or act on it briefly, then carry on toward the goal.`;
+          this.said = null;
+        } else note = what === 'next' ? 'The user pressed Next: they did that step, or want to move on.' : 'The user did something. Check what changed and give the next step.';
       }
     } catch (err) {
       console.error('[improvise]', err.status || '', err.message);
@@ -269,6 +277,7 @@ class ImprovisedWalkthrough {
       await new Promise((r) => setTimeout(r, this.pollMs));
       const now = Date.now();
       if (this.skipped) return 'next';
+      if (this.said) return 'said';
       if (this.inputAt > shownAt && now - this.inputAt >= this.idleMs) return 'input';
       let print = null;
       try {

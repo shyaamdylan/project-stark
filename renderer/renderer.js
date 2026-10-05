@@ -51,6 +51,8 @@ const state = {
   lastSpokenAt: 0,
   answering: null, // id of the question being answered
   typingAnswer: false, // they clicked the answer box to type instead of talking
+  convoUntil: 0, // after an exchange, keep listening (no wake word) until this time
+  canHear: false, // speech-to-text available (needs ElevenLabs)
   pointerAt: null, // where the cursor is pointing, while it's out of the orb
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
@@ -105,7 +107,35 @@ function frame(t) {
   }
   state.level += (target - state.level) * (target > state.level ? 0.5 : 0.12);
   orbEl.style.setProperty('--level', state.level.toFixed(3));
+  showStatus();
   requestAnimationFrame(frame);
+}
+
+// Awake (in a conversation) or dormant (only listening for its name), and what
+// it's doing right now, so you can always tell at a glance.
+const statusEl = $('status');
+let shownStatus = null;
+function showStatus() {
+  const isAwake = awake();
+  const talking = buddyEl.classList.contains('talking');
+  const thinking = buddyEl.classList.contains('thinking');
+  const hearing = buddyEl.classList.contains('hearing');
+  const micLive = isAwake && Mic.isOn();
+  let label = '';
+  let kind = '';
+  if (talking) [label, kind] = ['Speaking', 'speaking'];
+  else if (thinking) [label, kind] = ['Thinking…', 'thinking'];
+  else if (hearing && isAwake) [label, kind] = ['Hearing you', 'listening'];
+  else if (state.executing) [label, kind] = ['Working…', 'thinking'];
+  else if (micLive) [label, kind] = ['Listening', 'listening'];
+  else if (isAwake) [label, kind] = ['Ready', ''];
+  const key = `${isAwake}|${label}`;
+  if (key === shownStatus) return;
+  shownStatus = key;
+  buddyEl.classList.toggle('awake', isAwake);
+  buddyEl.classList.toggle('dormant', !isAwake);
+  statusEl.textContent = label;
+  statusEl.className = label ? kind : 'hidden';
 }
 
 // Measure ElevenLabs audio so the glow pulses with the actual voice. If the
@@ -551,6 +581,7 @@ async function handleAsk(input) {
   state.busy = true;
   try {
     await runAsk(text);
+    openConvo(); // a follow-up needs no wake word
   } catch (err) {
     // Whatever went wrong, never leave the buddy stuck mid-animation.
     console.error('[ask]', err);
@@ -610,6 +641,8 @@ async function runAsk(text, request = () => window.buddy.ask(text, state.agent))
     state.guiding = true;
     guideCount.textContent = 'Starting…';
     guideBar.classList.remove('hidden');
+    guideAskForm.classList.remove('hidden');
+    setTimeout(updateMic, 0); // a lesson is a conversation: the mic is open
     sayEl.textContent = res.title ? `Let's do it: ${res.title}` : '';
     showBubble();
     return;
@@ -668,14 +701,17 @@ async function showGuideStep(step) {
       guideNote.classList.toggle('hidden', !step.note);
     }
     if (step.rect) await pointTo(step.rect, step.label, Infinity);
-    else if (!step.quietMove) await goHome();
+    // An answer or a check-in leaves the cursor on what they're meant to do.
+    else if (!step.quietMove && !step.chat) await goHome();
     return;
   }
 
   // Finished, or can't go on.
   state.guiding = false;
   guideBar.classList.add('hidden');
+  guideAskForm.classList.add('hidden');
   guideNote.classList.add('hidden');
+  openConvo();
   if (step.status === 'done') flare();
   await goHome();
   await say(step.say, { mood: step.status === 'done' ? 'happy' : 'worried', hold: 2000 });
@@ -687,6 +723,9 @@ function stopGuide() {
   window.buddy.guideStop();
   stopSpeaking();
   guideBar.classList.add('hidden');
+  guideAskForm.classList.add('hidden');
+  stopGuideTyping();
+  setTimeout(updateMic, 0);
   guideNote.classList.add('hidden');
   nextStep = null;
   buddyEl.classList.remove('thinking');
@@ -712,6 +751,33 @@ nextBtn.addEventListener('click', () => {
   guideThinking();
   window.buddy.guideNext();
 });
+// Typing a question mid-lesson: the box takes the keyboard until it's sent.
+const guideAskForm = $('guide-ask-form');
+const guideAsk = $('guide-ask');
+function stopGuideTyping() {
+  if (!state.guideTyping) return;
+  state.guideTyping = false;
+  guideAsk.blur();
+  window.buddy.promptClosed();
+}
+guideAsk.addEventListener('focus', () => {
+  if (state.guideTyping) return;
+  state.guideTyping = true;
+  window.buddy.focusOverlay();
+});
+guideAsk.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') stopGuideTyping();
+});
+guideAskForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = guideAsk.value.trim();
+  guideAsk.value = '';
+  stopGuideTyping();
+  if (!text || !state.guiding) return;
+  showCaption(text);
+  window.buddy.guideSay(text);
+});
+
 $('guide-stop').addEventListener('click', () => (state.executing ? stopJarvis() : stopGuide()));
 
 // ---------- Jarvis at work ----------
@@ -765,7 +831,7 @@ window.buddy.on('jarvis-state', (j) => {
   guideBar.classList.add('hidden');
   guideNote.classList.add('hidden');
   buddyEl.classList.remove('thinking');
-  setTimeout(updateMic, 0);
+  openConvo();
   queueGuide(async () => {
     if (j.status === 'done') flare();
     await goHome();
@@ -919,6 +985,7 @@ function sendAnswer(value) {
   bubble.classList.add('hidden');
   sayEl.textContent = '';
   window.buddy.teachAnswer(id, value);
+  openConvo();
   if (value && value.trim()) say(nextAck(), { mood: 'happy', hold: 0 });
 }
 
@@ -966,8 +1033,29 @@ function splitWake(text) {
 }
 const hasWords = (t) => t.replace(/[^a-z0-9]/gi, '').length >= 2;
 
+// ---------- conversation mode ----------
+//
+// Once you're talking to it, you don't say "Hey Friday" every time. During a
+// lesson, a lesson being taught, or a Jarvis task, the mic is simply open. After
+// any other exchange, it stays open for a little while for a follow-up, then
+// goes back to dormant (listening only for its name).
+
+const CONVO_MS = 20000;
+let convoTimer = null;
+const convoOpen = () => Date.now() < state.convoUntil;
+
+function openConvo(ms = CONVO_MS) {
+  state.convoUntil = Date.now() + ms;
+  clearTimeout(convoTimer);
+  convoTimer = setTimeout(() => setTimeout(updateMic, 0), ms + 50);
+  setTimeout(updateMic, 0);
+}
+
+// In a conversation: lesson, task, being taught, a question open, or just talked.
+const awake = () => Boolean(state.guiding || state.executing || state.teaching || state.answering || state.listening || state.promptOpen || convoOpen());
+
 async function heard(wav, clip = {}) {
-  const active = state.listening || state.answering || state.teaching || state.executing;
+  const active = state.listening || state.answering || state.teaching || state.executing || state.guiding || convoOpen();
   let raw = '';
   try {
     if (!active && clip.head) {
@@ -1019,11 +1107,24 @@ async function heard(wav, clip = {}) {
     return;
   }
   if (state.executing) return; // only "stop" (above) or answers count while he works
-  // Background listening: only act when it starts with the wake word.
-  if (state.wakeEnabled && woke) {
+  // In a lesson, everything said is part of the conversation: questions,
+  // "I'm not sure how", "I don't want to do that bit".
+  if (state.guiding && !(woke && named && named !== state.agent)) {
+    if (!hasWords(text)) return;
+    showCaption(text);
+    if (/^(?:ok(?:ay)?,? )?(?:stop|end|cancel|quit|exit)(?: (?:the|this) (?:lesson|tutorial|walkthrough))?(?: now| please)?[.!]?$/i.test(text)) {
+      stopGuide();
+      return;
+    }
+    window.buddy.guideSay(text);
+    return;
+  }
+  // Background listening: only act when it starts with the wake word, or
+  // straight after an exchange (a follow-up needs no wake word).
+  if ((state.wakeEnabled && woke) || (convoOpen() && hasWords(text))) {
     const rest = text;
     if (state.busy) return;
-    switchAgent(named);
+    if (named) switchAgent(named);
     if (hasWords(rest)) {
       // "Hey Friday, how do I…": act on it straight away.
       if (state.guiding) stopGuide();
@@ -1039,7 +1140,7 @@ async function heard(wav, clip = {}) {
 
 function updateMic() {
   // Typed mode (npm run text) never opens the microphone.
-  const want = !state.micOff && (state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled);
+  const want = !state.micOff && (state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled || (state.canHear && (state.guiding || convoOpen())));
   if (want && !Mic.isOn()) {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
@@ -1168,7 +1269,7 @@ window.buddy.on('listen', ({ mode }) => startListening(mode));
 // `forward: true` we still receive mousemove, so flip as the cursor enters.
 document.addEventListener('mousemove', (e) => {
   const over = !!e.target.closest('.hit');
-  const want = over || state.promptOpen || state.typingAnswer;
+  const want = over || state.promptOpen || state.typingAnswer || state.guideTyping;
   if (want !== state.interactive) {
     state.interactive = want;
     window.buddy.setInteractive(want);
@@ -1229,6 +1330,7 @@ function switchAgent(id) {
 
 window.buddy.on('config', (c) => {
   state.micOff = Boolean(c.micOff);
+  state.canHear = Boolean(c.canHear);
   state.voice = c.voice;
   state.agents = c.agents || {};
   applyAgent(c.agent || 'friday', { show: false });

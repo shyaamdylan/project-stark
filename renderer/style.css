@@ -102,6 +102,81 @@ body[data-agent='jarvis'] #reactor {
   animation-duration: 2.4s;
 }
 
+/* ---------- awake vs dormant ----------
+   Dormant (only listening for "Hey Friday"): the orb rests, a little dimmer and calmer.
+   Awake (in a conversation, a lesson or a task): a halo breathes around it and a
+   small pill under it says what it's doing. */
+#buddy.dormant #goo-glow,
+#buddy.dormant #plasma {
+  opacity: 0.72;
+}
+#buddy.dormant .swirl.a {
+  animation-duration: 14s;
+}
+#buddy.dormant .swirl.b {
+  animation-duration: 20s;
+}
+#buddy.awake #orb {
+  animation: awake-halo 2.2s ease-in-out infinite;
+}
+#buddy.awake.hearing #orb {
+  animation-duration: 0.9s;
+}
+@keyframes awake-halo {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-glow), 0 0 14px var(--accent-glow); }
+  50% { box-shadow: 0 0 0 6px transparent, 0 0 26px var(--accent-glow); }
+}
+#status {
+  position: absolute;
+  right: calc(var(--inset) + var(--orb) / 2);
+  bottom: 6px;
+  transform: translateX(50%);
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(10, 16, 36, 0.78);
+  color: var(--core);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#status::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}
+#status.listening::before {
+  animation: rec-blink 1.2s ease-in-out infinite;
+}
+#status.thinking::before {
+  animation: rec-blink 0.5s ease-in-out infinite;
+}
+
+/* Asking a question mid-lesson by typing. */
+#guide-ask-form {
+  margin-top: 8px;
+}
+#guide-ask {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #dbeafe;
+  border-radius: 10px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+}
+#guide-ask:focus {
+  border-color: var(--accent);
+}
+
 /* The name of who you're talking to, shown for a moment when it changes. */
 #agent-tag {
   position: absolute;
@@ -596,7 +671,8 @@ body[data-agent='jarvis'] #reactor {
   .swirl,
   #body,
   #plasma,
-  #reactor {
+  #reactor,
+  #orb {
     animation: none !important;
   }
 }

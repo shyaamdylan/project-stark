@@ -159,6 +159,13 @@ class Replay {
     this.recovering = false;
     this.recoveries = 0;
     this.wakeScan = null;
+    this.skipped = new Set(); // step indexes the user chose to leave out
+    this.progressAt = Date.now(); // when an action was last completed
+    // Set by a tutor (src/tutor.js) to hear about the user going off the path:
+    //   onOffPath(why)  they did something other than the current action
+    //   onLost(why)     the thing for the current action isn't on screen
+    this.onOffPath = null;
+    this.onLost = null;
   }
 
   get total() {
@@ -213,22 +220,24 @@ class Replay {
   }
 
   // Point at the current action's element, or keep looking until it shows up.
-  point() {
+  // `say` replaces the scripted line (a tutor already said what to do).
+  point({ say = null, target = null } = {}) {
     if (!this.running || !this.action) return;
+    if (this.skipped.has(this.action.stepIndex)) return this.complete(0);
     const a = this.action;
     // Already where this step gets to? Carry straight on without a word.
     if (a.kind === 'go' && this.arrived(this.latest)) {
       this.complete(0);
       return;
     }
-    this.target = this.latest ? locate(a, this.latest.elements) : null;
+    this.target = target || (this.latest ? locate(a, this.latest.elements) : null);
     this.baseValue = this.target ? this.target.value : null;
     this.editSeenAt = 0;
     this.view = this.latest ? this.viewOf(this.latest) : null;
     this.lostSince = this.target || !a.label || a.kind === 'any-click' ? 0 : Date.now();
     this.emit({
       status: 'step',
-      say: lineFor(a, this.skill),
+      say: say != null ? say : lineFor(a, this.skill),
       note: noteFor(a, this.skill),
       target: this.target,
       stepNumber: a.stepIndex + 1,
@@ -266,7 +275,12 @@ class Replay {
       }
       // Keep looking locally either way; only ask Claude a couple of times per step.
       if (Date.now() - this.lostSince > RETRY_MS && this.recoveries < MAX_RECOVERIES) {
-        this.askClaude(`I can't see "${a.label}" (needed for step ${a.stepIndex + 1}) on the user's screen.`);
+        const why = `I can't see "${a.label}" (needed for step ${a.stepIndex + 1}) on the user's screen.`;
+        if (this.onLost) {
+          this.recoveries++;
+          this.lostSince = Date.now() + 8000; // give the tutor and the user time before the next nudge
+          this.onLost(why);
+        } else this.askClaude(why);
       }
       return;
     }
@@ -292,7 +306,9 @@ class Replay {
     if (!this.running || this.recovering || !this.action) return;
     const a = this.action;
     if (a.kind === 'any-click') return this.complete(150);
-    if ((a.kind === 'click') && this.target && inside(x, y, this.target)) this.complete(120);
+    if ((a.kind === 'click') && this.target && inside(x, y, this.target)) return this.complete(120);
+    // Clicked something else while a particular button was wanted.
+    if (this.onOffPath && (a.kind === 'click' || a.kind === 'shortcut') && this.target) this.onOffPath(`clicked away from "${a.label}"`);
   }
 
   onKey(shortcut) {
@@ -306,11 +322,37 @@ class Replay {
     if (this.running && !this.recovering) this.complete(0);
   }
 
+  // Leave out whole steps (1-based), e.g. a mode the user chose not to try.
+  skipSteps(numbers) {
+    for (const n of numbers || []) if (Number.isInteger(n) && n >= 1 && n <= this.total) this.skipped.add(n - 1);
+  }
+
+  // Carry on from the first action of a step (1-based), saying `say` instead of the scripted line.
+  async jumpToStep(n, { say = null, target = null } = {}) {
+    const at = this.actions.findIndex((x) => x.stepIndex === n - 1 && !this.skipped.has(x.stepIndex));
+    if (at < 0 || !this.running) return false;
+    this.index = at;
+    this.recoveries = 0;
+    await this.freshScan();
+    this.point({ say, target });
+    return true;
+  }
+
+  // Where the lesson is, for a tutor: the step, its action and what's being pointed at.
+  where() {
+    const a = this.action;
+    if (!a) return null;
+    return { stepNumber: a.stepIndex + 1, totalSteps: this.total, line: lineFor(a, this.skill), target: this.target ? this.target.label : a.label || null, skipped: [...this.skipped].map((i) => i + 1) };
+  }
+
   async complete(delay = 0) {
     if (this.completing) return;
     this.completing = true;
     this.recoveries = 0;
+    this.progressAt = Date.now();
     this.index++;
+    // Past any steps the user chose to leave out.
+    while (this.index < this.actions.length && this.skipped.has(this.actions[this.index].stepIndex)) this.index++;
     if (this.index >= this.actions.length) {
       this.running = false;
       this.emit({ status: 'done', say: `That's it, you've done it: ${this.skill.map.title}.`, target: null, stepNumber: this.total, totalSteps: this.total });

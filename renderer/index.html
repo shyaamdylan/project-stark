@@ -53,6 +53,10 @@
           <button id="guide-next" type="button">Next</button>
           <button id="guide-stop" type="button">Stop</button>
         </div>
+        <!-- During a lesson: ask anything by typing (or just say it). -->
+        <form id="guide-ask-form" class="hidden" autocomplete="off">
+          <input id="guide-ask" type="text" placeholder="Ask anything, or just say it…" spellcheck="false" />
+        </form>
       </div>
 
       <div id="caption" class="hidden"></div>
@@ -68,6 +72,9 @@
 
       <!-- Who you're talking to, shown for a moment when it changes -->
       <div id="agent-tag" class="hidden"></div>
+
+      <!-- What she's doing right now: Listening, Thinking, Speaking, Working. Hidden when dormant. -->
+      <div id="status" class="hidden"></div>
 
       <div id="orb" class="hit" role="button" aria-label="Ask Friday">
         <div id="reactor"></div>
