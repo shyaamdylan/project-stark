@@ -43,3 +43,24 @@ test('env prefixes split off, and the Terminal script quotes safely', () => {
   assert.match(s, /^cd '\/Users\/me\/it'\\''s here' \|\| exit 1$/m);
   assert.match(s, /^\{ \.\/run\.sh ; \} 2>&1 \| tee '\/tmp\/l\.log'$/m);
 });
+
+test('exit codes and listening servers are read back', () => {
+  const { exitCode, parseListening } = require('../src/runproject');
+  assert.equal(exitCode('Port 8000 is already in use.\n[exit 1]\n'), 1);
+  assert.equal(exitCode('ready on http://localhost:3100'), null);
+  assert.deepEqual(parseListening('p10\ncnode\nn*:3100\nn[::1]:3100\np11\ncPython\nn127.0.0.1:8000\np12\ncrapportd\nn*:51551\n'), [
+    { pid: 10, command: 'node', port: 3100 },
+    { pid: 11, command: 'Python', port: 8000 },
+  ]);
+});
+
+test('servers are matched to the project folder they were started in', () => {
+  const { serversIn } = require('../src/runproject');
+  const list = () => [
+    { command: 'node', port: 3100, folder: '~/Documents/app/web' },
+    { command: 'Python', port: 8000, folder: '~/Documents/app' },
+    { command: 'Python', port: 8791, folder: '~/Documents/app-other' },
+  ];
+  assert.deepEqual(serversIn('/Users/me/Documents/app', '/Users/me', list).map((x) => x.port), [3100, 8000]);
+  assert.deepEqual(serversIn('/Users/me/Documents/nothing', '/Users/me', list), []);
+});

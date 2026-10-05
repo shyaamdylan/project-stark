@@ -109,8 +109,60 @@ const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 // A .command file Terminal runs when opened (no Automation permission needed):
 // it goes to the project, runs the command, and copies the output to `log`.
+// When it ends, "[exit N]" is added to the log so Jarvis knows straight away.
 function commandFile(dir, command, log) {
-  return `#!/bin/bash\ncd ${shQuote(dir)} || exit 1\necho ${shQuote(`Jarvis is running: ${command}`)}\n{ ${command} ; } 2>&1 | tee ${shQuote(log)}\n`;
+  return `#!/bin/bash\ncd ${shQuote(dir)} || exit 1\necho ${shQuote(`Jarvis is running: ${command}`)}\n{ ${command} ; } 2>&1 | tee ${shQuote(log)}\necho "[exit \${PIPESTATUS[0]}]" >> ${shQuote(log)}\n`;
 }
 
-module.exports = { commandVerdict, documentedCommands, projectFolder, splitEnv, findUrls, commandFile, shQuote };
+// "[exit 1]" at the end of a log -> 1, or null while it's still running.
+function exitCode(output) {
+  const m = /\[exit (\d+)\]\s*$/.exec(String(output));
+  return m ? Number(m[1]) : null;
+}
+
+// Local servers already listening, from `lsof -nP -iTCP -sTCP:LISTEN -Fpcn`
+// output: [{ pid, command, port }]. Only ports a dev server would use.
+function parseListening(text) {
+  const out = [];
+  let pid = null;
+  let command = '';
+  for (const line of String(text).split('\n')) {
+    if (line[0] === 'p') pid = Number(line.slice(1));
+    else if (line[0] === 'c') command = line.slice(1);
+    else if (line[0] === 'n') {
+      const port = Number((/:(\d+)$/.exec(line) || [])[1]);
+      if (port >= 1024 && port < 49152 && !out.some((x) => x.port === port)) out.push({ pid, command, port });
+    }
+  }
+  return out;
+}
+
+// Each server's port and the folder it was started from (its working
+// directory), so "PianoScribe is already running" comes with its address.
+function listeningServers(home = os.homedir()) {
+  const { execFileSync } = require('child_process');
+  const run = (args) => {
+    try {
+      return execFileSync('/usr/sbin/lsof', args, { encoding: 'utf8', timeout: 4000 });
+    } catch (err) {
+      return err.stdout || '';
+    }
+  };
+  const servers = parseListening(run(['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']));
+  for (const s of servers) {
+    const cwd = (/^n(.+)$/m.exec(run(['-a', '-p', String(s.pid), '-d', 'cwd', '-Fn'])) || [])[1] || '';
+    s.folder = cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+  }
+  return servers.filter((s) => s.folder.startsWith('~/'));
+}
+
+// Servers started from inside this folder (or a folder within it).
+function serversIn(dir, home = os.homedir(), list = listeningServers) {
+  const rel = path.relative(home, dir);
+  return list(home).filter((s) => {
+    const f = s.folder.replace(/^~\/?/, '');
+    return f === rel || f.startsWith(`${rel}${path.sep}`);
+  });
+}
+
+module.exports = { commandVerdict, documentedCommands, projectFolder, splitEnv, findUrls, commandFile, exitCode, parseListening, listeningServers, serversIn, shQuote };

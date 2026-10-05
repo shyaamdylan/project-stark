@@ -1,0 +1,47 @@
+# Project Stark
+
+Friday (learns and teaches tasks) and Jarvis (does them for you) share one orb on the Mac
+screen. Electron app: `main.js` wires things together, `src/` holds the logic, `test/` the
+unit tests (`npm test`).
+
+## Fix the cause, not the case
+
+Jarvis has to work for any file, app, website or project the user names, not just the one in
+today's bug report. When something goes wrong:
+
+- **Find out why it went wrong** before changing anything. Read the run logs
+  (`~/Library/Application Support/Project Stark/jarvis-runs/*.json`) and the terminal output,
+  and reproduce it with `npm run text` (below).
+- **Fix that cause, for every case it covers.** Ask "what else would fail for the same reason?"
+  For example, "open the PianoScribe README" found nothing because Spotlight isn't indexing the
+  home folder. The fix was a folder-walk fallback for every file search, not special handling
+  for READMEs or PianoScribe.
+- **Never hard-code the example.** No project names, ports, paths or phrasings from the bug
+  report in code, prompts or regexes. Examples in prompts should be generic (`my-app`,
+  `localhost:3100`) so Claude doesn't over-fit to them.
+- **Prefer giving Jarvis the facts over adding rules for situations.** If he guessed wrong, he
+  was usually missing information (what's already running, what a command printed, its exit
+  code). Give him that information, rather than another rule about a particular scenario.
+- **Add a test for the general behaviour** with made-up names, not the user's real files.
+
+## Testing without voice
+
+Don't spend ElevenLabs credits testing. Use typed mode (voice and mic off, output printed):
+
+```bash
+npm run text                                   # interactive
+STARK_DRY=1 npm run text -- "Jarvis, …" "yes"  # scripted; clicks/typing/opening only logged
+```
+
+It runs alongside the normal app. Drop `STARK_DRY=1` to check something really works end to
+end, and say so when you do: it acts on the real screen.
+
+## Safety lines that stay
+
+- Jarvis never types or presses keys in a terminal app. Commands go through `run_command`
+  (`src/runproject.js`): only commands the project documents, in its own folder, one at a time,
+  with the user's yes, in a visible Terminal window. Deleting, sudo, piping downloads into a
+  shell, and system or git-history changes are refused.
+- Risky clicks and keys need a yes. Passwords and codes are never typed or read.
+- File access is limited to the home folder, never hidden folders, `~/Library` or
+  secret-looking files.

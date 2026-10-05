@@ -195,3 +195,43 @@ test('spoken key names', () => {
   assert.equal(spokenShortcut('share'), null); // a button, not a key
   assert.equal(spokenShortcut('s'), null); // a bare letter would just type it
 });
+
+test('Jarvis: a project that is already running is not started again, unless asked twice', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'home-')));
+  const dir = path.join(home, 'Documents', 'app');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { dev: 'next dev', test: 'jest' } }));
+  const oldHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const ran = [];
+    let up = [{ command: 'node', port: 3100, folder: '~/Documents/app' }];
+    const brain = scripted([
+      { status: 'step', kind: 'run_command', text: 'npm run dev', folder: '~/Documents/app' },
+      { status: 'step', kind: 'run_command', text: 'npm test', folder: '~/Documents/app' },
+      { status: 'step', kind: 'run_command', text: 'npm test', folder: '~/Documents/app' },
+      { status: 'done', say: 'Done.' },
+    ]);
+    const run = new JarvisFreestyle({
+      goal: 'run my app',
+      improviser: brain,
+      scan: async () => ({ app: 'Finder', elements: [] }),
+      act: {
+        serversIn: async () => up,
+        runCommand: async ({ command }) => (ran.push(command), { ok: true, finished: true, code: 0, output: 'ok', urls: [], servers: [] }),
+      },
+      ask: async () => 'yes',
+      wait: () => Promise.resolve(),
+    });
+    const res = await run.run();
+    assert.equal(res.status, 'done');
+    assert.match(brain.notes[1], /Already running from this project: node on http:\/\/localhost:3100/);
+    assert.match(brain.notes[2], /Already running/);
+    assert.deepEqual(ran, ['npm test']); // dev was never started twice; tests ran once asked again
+  } finally {
+    process.env.HOME = oldHome;
+  }
+});

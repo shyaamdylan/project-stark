@@ -722,6 +722,7 @@ class JarvisFreestyle extends JarvisRun {
     super({ skill: { map: { title: goal, steps: [] }, session: { events: [] } }, actions: [], plan: { can_run: true, inputs: [], actions: [], step_lines: [] }, ...deps });
     this.goal = goal;
     this.brain = improviser;
+    this.ranAnyway = new Set(); // commands to run even though the project is already up
   }
 
   async runInner() {
@@ -886,6 +887,16 @@ class JarvisFreestyle extends JarvisRun {
           return `Refused to run "${command}" in ${folder}: ${v.why}.`;
         }
         if (!this.act.runCommand) throw new Error("I can't run commands here");
+        // Know what's already running from this project before starting
+        // anything: starting a second copy just fails on a busy port. Asked for
+        // again after seeing this, it runs (tests, a build: not a restart).
+        const key = `${v.dir}\n${command}`;
+        const running = this.act.serversIn && !this.ranAnyway.has(key) ? await this.act.serversIn(v.dir) : [];
+        if (running.length) {
+          this.ranAnyway.add(key);
+          this.record({ kind: 'already-running', detail: v.dir, value: running.map((x) => `${x.command}:${x.port}`).join(', ') });
+          return `Not run yet. Already running from this project: ${running.map((x) => `${x.command} on http://localhost:${x.port} (in ${x.folder})`).join('; ')}. If "${command}" would start it again, use that instead. If it does something else, give the same run_command again and it will run.`;
+        }
         const where = folder.replace(/^~\//, '');
         if (!(await this.confirm(this.s(`I'll run "${command}" in ${where}. Go ahead{sir}?`)))) {
           return 'The user said no to running that. Finish (status done) with the command for them to run themselves, in one sentence.';
@@ -896,7 +907,8 @@ class JarvisFreestyle extends JarvisRun {
         });
         this.record({ kind: 'run', detail: `${v.dir}: ${command}`, value: got && got.output ? got.output.slice(-400) : '' });
         if (!got || !got.ok) throw new Error(got && got.why ? got.why : `couldn't run "${command}"`);
-        return `Ran "${command}" in ${v.dir}, in a Terminal window (${got.finished ? 'it has finished' : 'still running'}).${got.urls.length ? ` Web addresses in its output: ${got.urls.join(', ')}.` : ''} Output so far:\n${got.output || '(nothing yet)'}`;
+        const servers = (got.servers || []).map((x) => `${x.command} on http://localhost:${x.port} (started in ${x.folder})`);
+        return `Ran "${command}" in ${v.dir}, in a Terminal window (${got.finished ? `it has finished, exit code ${got.code}` : 'still running'}).${got.urls.length ? ` Web addresses in its output: ${got.urls.join(', ')}.` : ''}${servers.length ? ` Local servers running now: ${servers.join('; ')}.` : ''} Output so far:\n${got.output || '(nothing yet)'}`;
       }
       case 'wait':
         await this.wait(2000);

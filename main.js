@@ -666,7 +666,7 @@ const hands = {
     const err = await new Promise((resolve) => execFile('/usr/bin/open', ['-a', 'Terminal', script], (e) => resolve(e ? e.message : '')));
     if (err) return { ok: false, why: `Terminal wouldn't open (${err.split('\n')[0]})` };
     console.log(`[jarvis] running in ${dir}: ${command}`);
-    // Wait for it to print an address, finish, or go quiet for a while.
+    // Wait for it to finish, print an address, or go quiet for a while.
     const started = Date.now();
     let output = '';
     let changedAt = started;
@@ -677,12 +677,24 @@ const hands = {
         output = now;
         changedAt = Date.now();
       }
+      if (runProject.exitCode(output) != null) break;
       if (runProject.findUrls(output).length && Date.now() - changedAt > 1500) break;
       if (Date.now() - changedAt > 8000 && output) break;
       if (Date.now() - started > 60000) break;
     }
-    const finished = /(\$ ?|% ?)$/.test(output) || false;
-    return { ok: true, finished, output: output.slice(-3000), urls: runProject.findUrls(output) };
+    const code = runProject.exitCode(output);
+    let servers = [];
+    try {
+      servers = runProject.listeningServers();
+    } catch {}
+    return { ok: true, finished: code != null, code, output: output.replace(/\x1b\[[0-9;]*m/g, '').slice(-3000), urls: runProject.findUrls(output), servers };
+  },
+  serversIn: async (dir) => {
+    try {
+      return runProject.serversIn(dir);
+    } catch {
+      return [];
+    }
   },
   // Only apps installed in the Applications folders.
   openApp: async (name) => {
