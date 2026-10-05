@@ -21,6 +21,7 @@ const { AGENTS, persona, rendererInfo } = require('./src/persona');
 const { readTextFile, resolveFile, findFiles, isClear, parseQuery, appRoots, setPicksFile, rememberPick, makeRephrase } = require('./src/files');
 const windows = require('./src/windows');
 const { correctNames, knownNames } = require('./src/names');
+const sessionLog = require('./src/sessionlog');
 const act = require('./src/act');
 const textMode = require('./src/textmode');
 const runProject = require('./src/runproject');
@@ -64,6 +65,16 @@ function createWindow() {
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
+  // Everything the orb says or points at goes in the session log (text mode prints its own).
+  if (!textMode.enabled()) {
+    const send = win.webContents.send.bind(win.webContents);
+    win.webContents.send = (channel, payload) => {
+      try {
+        sessionLog.convoFromSend(channel, payload, agent);
+      } catch {}
+      send(channel, payload);
+    };
+  }
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   // Show the orb's own log lines ("[mic] …") in the terminal too.
   win.webContents.on('console-message', (e) => {
@@ -217,7 +228,12 @@ function splitWake(text) {
 }
 const stripWake = (text) => splitWake(text).rest;
 
-ipcMain.handle('ask', (_e, rawText, who) => handleAsk(rawText, who));
+ipcMain.handle('ask', async (_e, rawText, who) => {
+  sessionLog.convo('You', rawText);
+  const res = await handleAsk(rawText, who);
+  sessionLog.convoFromReply(res, agent);
+  return res;
+});
 async function handleAsk(rawText, who) {
   try {
     const { agent: named, rest } = splitWake(rawText);
@@ -488,6 +504,12 @@ async function matchSkill(text) {
 // After a clarifying question: yes starts the skill, no says so, anything else is a new request.
 let pendingClarify = null;
 ipcMain.handle('confirm', async (_e, rawText) => {
+  sessionLog.convo('You', rawText, '[answering]');
+  const res = await confirmReply(rawText);
+  sessionLog.convoFromReply(res, agent);
+  return res;
+});
+async function confirmReply(rawText) {
   try {
     const text = stripWake(rawText);
     const pending = pendingClarify && Date.now() - pendingClarify.at < 60000 ? pendingClarify : null;
@@ -511,7 +533,7 @@ ipcMain.handle('confirm', async (_e, rawText) => {
     console.error('[confirm]', err);
     return { ok: false, reason: 'error', say: 'Something went wrong. Try again.' };
   }
-});
+}
 
 async function beginSkill(id, text) {
   let skill = loadSkill(id);
@@ -578,7 +600,7 @@ ipcMain.on('guide-say', (_e, text) => guideSay(text));
 function guideSay(text) {
   const t = tidySpeech(String(text || ''));
   if (!t) return false;
-  console.log(`[lesson] they said: ${JSON.stringify(t)}`);
+  sessionLog.convo('You', t, '[during the lesson]');
   if (replay) replay.onUserSays(t);
   else if (improv) improv.onUserSays(t);
   else return false;
@@ -1236,6 +1258,7 @@ function askUser(text, phase) {
 }
 
 ipcMain.on('teach-answer', (_e, { id, text }) => {
+  sessionLog.convo('You', text || '', text && text.trim() ? '[answer]' : '[skipped the question]');
   const resolve = answerWaiters.get(id);
   if (!resolve) return;
   answerWaiters.delete(id);
@@ -1324,6 +1347,7 @@ function setOffRecord(off) {
 }
 
 ipcMain.on('teach-narrate', (_e, text) => {
+  sessionLog.convo('You', text, '[explaining while teaching]');
   if (!teach || !teach.session.running) return;
   const cmd = teach.session.onNarration(text);
   if (cmd === 'finish') finishTeach();
@@ -1507,6 +1531,8 @@ function buildTrayMenu() {
       },
       { label: 'Open Skills Hub', click: () => openHub() },
       { label: 'What can you see? (debug)', click: () => dumpScan() },
+      { label: "Open this session's log", click: () => sessionLog.sessionLogPath() && shell.openPath(sessionLog.sessionLogPath()) },
+      { label: 'Show all logs in Finder', click: () => shell.openPath(path.join(app.getPath('userData'), 'logs')) },
       { label: 'Open Accessibility settings', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
       { label: 'Open folder for .env (API keys)', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' },
@@ -1561,6 +1587,12 @@ if (!firstInstance) {
 }
 
 if (firstInstance) app.whenReady().then(() => {
+  // Before anything else prints: the whole run goes to a log file too.
+  try {
+    sessionLog.startSessionLog(path.join(app.getPath('userData'), 'logs'));
+  } catch (err) {
+    console.error('[log] could not start the session log:', err.message);
+  }
   cfg = loadConfig(app.getPath('userData'));
   if (textMode.enabled()) startTextMode();
   setPicksFile(path.join(app.getPath('userData'), 'file-picks.json'));

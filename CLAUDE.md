@@ -35,6 +35,13 @@ she gets something wrong, give her more of those facts rather than another rule.
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
 
+## Session logs
+
+Every run writes the terminal output plus the conversation (what was said or typed, what Friday
+and Jarvis said, pointed at and did) to
+`~/Library/Application Support/Project Stark/logs/session-<time>.log` (last 20 kept; 👀 menu →
+"Open this session's log"). When the user sends one, read it before changing anything.
+
 ## Testing without voice
 
 Don't spend ElevenLabs credits testing. Use typed mode (voice and mic off, output printed):
