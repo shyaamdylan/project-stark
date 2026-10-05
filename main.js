@@ -17,7 +17,7 @@ const { JarvisRun, planRun, riskOf, isYes } = require('./src/jarvis');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
 const { findFiles } = require('./src/files');
 const act = require('./src/act');
-const { Apprentice } = require('./src/apprentice');
+const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
 const { transcribe } = require('./src/stt');
@@ -356,6 +356,33 @@ async function replayPlan(id, skill) {
   return plan;
 }
 
+// Skills taught before the tidy-up pass existed (or under older rules) are
+// tidied the first time they're used. The original stays as workmap.original.json.
+async function ensureRefined(id, skill) {
+  if ((skill.map.refined || 0) >= REFINE_VERSION || !Guide.available(cfg)) return skill;
+  const dir = skillDir(id);
+  if (win) win.webContents.send('say', { text: 'Tidying up that lesson first…', speak: false });
+  try {
+    const map = await new Apprentice(cfg.anthropicApiKey).refineMap({
+      title: skill.session.title || skill.map.title,
+      events: skill.session.events || [],
+      qas: skill.session.qas || [],
+      map: skill.map,
+    });
+    const original = path.join(dir, 'workmap.original.json');
+    if (!fs.existsSync(original)) fs.copyFileSync(path.join(dir, 'workmap.json'), original);
+    fs.writeFileSync(path.join(dir, 'workmap.json'), JSON.stringify(map, null, 2));
+    fs.writeFileSync(path.join(dir, 'index.html'), renderWorkMap({ map, session: skill.session }));
+    // Plans made from the old map no longer fit.
+    for (const f of ['replay.json', 'jarvis.json']) fs.rmSync(path.join(dir, f), { force: true });
+    console.log(`[skills] tidied "${map.title}": ${map.cleanup_notes.join(' | ') || 'nothing to change'}`);
+    return { ...skill, map };
+  } catch (err) {
+    console.error('[skills] tidy up', err.message);
+    return skill;
+  }
+}
+
 function loadSkill(id) {
   const dir = skillDir(id);
   const map = dir && readJson(path.join(dir, 'workmap.json'));
@@ -436,8 +463,9 @@ ipcMain.handle('confirm', async (_e, rawText) => {
 });
 
 async function beginSkill(id, text) {
-  const skill = loadSkill(id);
+  let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: "I haven't learned that yet." };
+  skill = await ensureRefined(id, skill);
 
   let plan = null;
   try {
@@ -526,6 +554,23 @@ const hands = {
     return act.selectAll();
   },
   escape: () => act.escape(),
+  // Only web addresses, opened in the default browser.
+  openUrl: async (url) => {
+    const safe = cleanUrl(url);
+    if (!safe) throw new Error(`not a web address: ${url}`);
+    await shell.openExternal(safe);
+    console.log(`[jarvis] opened ${safe}`);
+  },
+  // Only apps installed in the Applications folders.
+  openApp: async (name) => {
+    const file = `${path.basename(String(name)).replace(/\.app$/i, '')}.app`;
+    const dirs = ['/Applications', '/System/Applications', '/System/Applications/Utilities', '/Applications/Utilities', path.join(app.getPath('home'), 'Applications')];
+    const found = dirs.map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
+    if (!found) return false;
+    const err = await shell.openPath(found);
+    console.log(`[jarvis] opened ${found}${err ? ` (failed: ${err})` : ''}`);
+    return !err;
+  },
 };
 
 const OPEN_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:open|launch|start|pull up|bring up|load)\s+(?:up\s+)?(.+?)(?:\s+for me)?(?:\s+please)?$/i;
@@ -664,8 +709,9 @@ async function jarvisPlan(id, skill, actions) {
 
 async function beginJarvis(id) {
   const p = persona('jarvis', cfg);
-  const skill = loadSkill(id);
+  let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}.") };
+  skill = await ensureRefined(id, skill);
 
   let recorded = null;
   try {
@@ -886,7 +932,8 @@ async function finishTeach() {
     replayPlan(path.basename(dir), { map, session: session.toJSON() }).catch((err) => console.error('[teach] replay plan', err.message));
     openHub(path.basename(dir));
     const judg = map.steps.filter((s) => s.is_judgment).length;
-    win.webContents.send('say', { text: `Got it. Your Work Map has ${map.steps.length} steps and ${judg} judgment calls. I've opened it for you.`, mood: 'happy' });
+    const tidied = (map.cleanup_notes || []).length ? ' I tidied it up so anyone can follow it from wherever they start.' : '';
+    win.webContents.send('say', { text: `Got it. Your Work Map has ${map.steps.length} steps and ${judg} judgment calls.${tidied} I've opened it for you.`, mood: 'happy' });
   } catch (err) {
     console.error('[teach] finish', err);
     fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify(session.toJSON(), null, 2));

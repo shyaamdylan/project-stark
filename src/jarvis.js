@@ -20,7 +20,7 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { describeEvent } = require('./apprentice');
 const { findBest, normalize } = require('./matcher');
-const { locate } = require('./replay');
+const { locate, atDestination, nextTargetVisible } = require('./replay');
 const { parseShortcut } = require('./act');
 
 const MODEL = 'claude-opus-5-5';
@@ -30,6 +30,7 @@ const AIM_MS = 650; // let the orb's cursor arrive before clicking, so you can s
 const SETTLE_MS = 700; // give the app a moment to react after each action
 const LOOK_MS = 1500;
 const HANDOFF_MS = 90000; // how long to wait for the user to do something for him
+const ARRIVE_MS = 15000; // after opening a site or app, how long to wait for it to show up
 const MAX_RUN_MS = 15 * 60 * 1000;
 
 // ---------- safety rules (pure, tested) ----------
@@ -94,6 +95,7 @@ function describeAction(a, i) {
     case 'click': line = `click ${what} "${a.label}"`; break;
     case 'edit': line = `set ${what} "${a.label}" (the expert entered "${a.value ?? ''}")`; break;
     case 'shortcut': line = `press ${a.keys}`; break;
+    case 'go': line = `get to ${a.destination ? `${a.destination.name}${a.destination.url ? ` (${a.destination.url})` : ''}` : 'the next screen'} (skipped if already there; needs no input)`; break;
     case 'choose': case 'any-click': line = `pick the case-specific item${a.say ? ` (${a.say})` : ''}`; break;
     default: line = `wait / check${a.say ? ` (${a.say})` : ''}`;
   }
@@ -220,7 +222,8 @@ class JarvisRun {
   //   plan      from planRun
   //   s(line)   fills in the form of address ("Right away{sir}.")
   //   scan()    front-window scan
-  //   act       { click(rect), type(text), keys(spec), selectAll(), escape() }
+  //   act       { click(rect), type(text), keys(spec), selectAll(), escape(),
+  //               openUrl(url), openApp(name) -> true if found }
   //   ask(text, phase) -> the user's answer ('' if skipped or cancelled)
   //   emit(ev)  { type: 'step' | 'point' | 'say', say, stepNo, totalSteps, target }
   //   wait(ms)  (tests pass a fast one, and a short findMs)
@@ -243,6 +246,8 @@ class JarvisRun {
     this.handoff = null; // resolves when the user clicks for us
     this.asking = false; // waiting on the user's answer: they may click around to check something
     this.executing = false; // past the go-ahead, doing the steps
+    this.userDriving = false; // he asked the user to bring something up: their clicks are expected
+    this.index = 0;
     this.inputs = {};
     this.log = [];
     this.latest = null;
@@ -270,7 +275,7 @@ class JarvisRun {
   onUserClick() {
     if (!this.running) return;
     if (this.handoff) return this.handoff(true);
-    if (this.asking || !this.executing) return;
+    if (this.asking || this.userDriving || !this.executing) return;
     // Our own clicks show up here too; ignore anything just after we acted.
     if (this.acting || Date.now() - this.actedAt < 500) return;
     this.stop('user-click');
@@ -432,6 +437,7 @@ class JarvisRun {
     let lastStep = -1;
     for (let i = 0; i < this.actions.length; i++) {
       this.check();
+      this.index = i;
       const a = this.actions[i];
       const p = plan.actions[i];
       if (a.stepIndex !== lastStep) {
@@ -475,6 +481,7 @@ class JarvisRun {
       case 'click': return this.doClick(a);
       case 'edit': return this.doEdit(a, p);
       case 'shortcut': return this.doShortcut(a);
+      case 'go': return this.doGo(a);
       case 'choose':
       case 'any-click': return this.doChoose(a, p);
       default:
@@ -487,6 +494,51 @@ class JarvisRun {
     const el = await this.find(a);
     if (!el) return this.handOff(`I can't find "${a.label}" on screen{sir}. Would you click it for me? I'll take it from there.`);
     await this.clickOn(el, 'click');
+  }
+
+  // Is the user where a "go" step gets to (or is the next thing to click already showing)?
+  async isThere(a) {
+    const s = await this.scan();
+    return Boolean(s && (atDestination(s, a.destination) || nextTargetVisible(this.actions, this.index, s.elements)));
+  }
+
+  async waitUntilThere(a, ms) {
+    const until = Date.now() + ms;
+    for (;;) {
+      if (await this.isThere(a)) return true;
+      if (Date.now() > until) return false;
+      await this.wait(700);
+    }
+  }
+
+  // Get to a website, app or screen from wherever the user happens to be.
+  async doGo(a) {
+    const d = a.destination || { name: 'the right screen' };
+    if (await this.isThere(a)) return this.record({ kind: 'go', detail: `already at ${d.name}` });
+    let opened = false;
+    if (d.url && this.act.openUrl) {
+      await this.doAct(() => this.act.openUrl(d.url));
+      opened = true;
+    } else if (d.app && this.act.openApp) {
+      await this.doAct(async () => {
+        opened = await this.act.openApp(d.app);
+      });
+    }
+    this.record({ kind: 'go', detail: opened ? `opened ${d.url || d.app}` : `asked the user to bring up ${d.name}` });
+    if (opened && (await this.waitUntilThere(a, ARRIVE_MS))) return this.wait(SETTLE_MS);
+
+    // Couldn't get there himself: the user brings it up, and he carries on once it's on screen.
+    this.emit({ type: 'say', say: this.s(`Would you bring up ${d.name} for me{sir}? I'll carry on as soon as it's on screen.`) });
+    this.userDriving = true;
+    try {
+      if (!(await this.waitUntilThere(a, HANDOFF_MS))) {
+        this.stop('handoff-timeout');
+        this.check();
+      }
+    } finally {
+      this.userDriving = false;
+    }
+    await this.wait(SETTLE_MS);
   }
 
   async doShortcut(a) {

@@ -28,7 +28,9 @@ Reply with the single next step:
 - status "done": every Work Map step is complete. say a short wrap-up.
 - status "stuck": the user is somewhere the Work Map doesn't cover, or wants something it doesn't include. Say so in under 12 words, naming the step to go back to. Don't explain further.
 
-Look at what changed since the last step. If the user didn't do what you asked, repeat it gently. Only use target_id values from the current list; use null when there's nothing to point at.`;
+Look at what changed since the last step. If the user didn't do what you asked, repeat it gently. Only use target_id values from the current list; use null when there's nothing to point at.
+
+Where the user starts doesn't matter. A "Get to" step is done as soon as they're at that place, however they got there: if they're already there, move straight on. Never send them to where the expert happened to start.`;
 
 const OUTPUT_SCHEMA = {
   type: 'object',
@@ -79,19 +81,31 @@ function describeScreen(elements) {
 
 // The Work Map as text for Claude: each step with what the expert actually did
 // on screen, so the guide can find the same things on the user's screen.
+// "Get to canva.com (https://www.canva.com/)" for a step that's about reaching a place.
+function destinationText(d) {
+  if (!d) return '';
+  return `${d.name}${d.url ? ` (${d.url})` : d.app ? ` (the ${d.app} app)` : ''}`;
+}
+
+// What the task relies on before step 1 ("Signed in to Canva").
+function prerequisitesText(map) {
+  return map.prerequisites && map.prerequisites.length ? `Before starting: ${map.prerequisites.join('; ')}.` : '';
+}
+
 function describeSkill({ map, session }) {
   const events = new Map((session.events || []).map((e) => [e.id, e]));
   const steps = map.steps.map((s, i) => {
     const lines = [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`];
+    if (s.kind === 'go') lines.push(`  Get to: ${destinationText(s.destination)} (from anywhere; skip if already there)`);
     if (s.decision) lines.push(`  Decision: ${s.decision}`);
     if (s.reason) lines.push(`  Expert's reason: "${s.reason}"`);
     if (s.rule) lines.push(`  Rule: ${s.rule}`);
     for (const g of s.guardrails) lines.push(`  Guardrail (${g.kind.replace(/_/g, ' ')}): ${g.text}`);
     const did = s.event_ids.map((id) => events.get(id)).filter(Boolean).map((e) => `    ${describeEvent(e).replace(/^e\d+ \d\d:\d\d /, '')}`);
-    if (did.length) lines.push('  What the expert did on screen:', ...did);
+    if (did.length) lines.push(s.kind === 'go' ? '  How the expert happened to get there (just one route):' : '  What the expert did on screen:', ...did);
     return lines.join('\n');
   });
-  return `Learned task: ${map.title}\n${map.summary}\n\n${steps.join('\n\n')}`;
+  return [`Learned task: ${map.title}`, map.summary, prerequisitesText(map)].filter(Boolean).join('\n') + `\n\n${steps.join('\n\n')}`;
 }
 
 const PLAN_SYSTEM = `You turn a recorded demonstration into a clean replay plan: the minimal sequence of actions a learner should do to complete the task, in order.
@@ -103,6 +117,7 @@ Rules:
 - If the expert picked something specific to that one case (a particular video, invoice row, file or search result), use kind "choose" with event_id null, and say what to pick in general terms.
 - Use kind "click", "edit" or "shortcut" with the expert's event_id for actions on fixed controls (buttons, menus, fields, tabs).
 - Use kind "look" with event_id null for a step with nothing to click (wait for something, check a result).
+- A step marked "Get to" is about reaching a place, not the route there: give it exactly one action, kind "go" with event_id null, saying where to get to ("Open canva.com in your browser."). Never replay how the expert happened to get there (clicking an address bar on some other site, switching from an unrelated app).
 - Every action has a short spoken line (under 20 words) saying what to do, using only the Work Map. Say key names as words ("Command C"). On the first action of a judgment step, add the expert's reason briefly.
 - Never add actions, buttons or advice that aren't in the recording or the Work Map.`;
 
@@ -116,7 +131,7 @@ const PLAN_SCHEMA = {
         properties: {
           step_number: { type: 'integer' },
           event_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
-          kind: { type: 'string', enum: ['click', 'edit', 'shortcut', 'choose', 'look'] },
+          kind: { type: 'string', enum: ['click', 'edit', 'shortcut', 'choose', 'look', 'go'] },
           say: { type: 'string' },
         },
         required: ['step_number', 'event_id', 'kind', 'say'],
@@ -134,7 +149,8 @@ async function planReplay(apiKey, skill) {
   const events = new Map((skill.session.events || []).map((e) => [e.id, e]));
   const steps = skill.map.steps.map((s, i) => {
     const did = s.event_ids.map((id) => events.get(id)).filter((e) => e && e.type !== 'screen').map((e) => `    ${describeEvent(e).replace(/^(e\d+) \d\d:\d\d /, '$1 ')}`);
-    return [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`, s.is_judgment && s.reason ? `  Expert's reason: "${s.reason}"` : '', ...s.guardrails.map((g) => `  Guardrail: ${g.text}`), did.length ? '  What the expert did:' : '', ...did]
+    const go = s.kind === 'go' ? `  Get to: ${destinationText(s.destination)}` : '';
+    return [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`, go, s.inferred ? '  (Added to fill a gap; not in the recording.)' : '', s.is_judgment && s.reason ? `  Expert's reason: "${s.reason}"` : '', ...s.guardrails.map((g) => `  Guardrail: ${g.text}`), did.length ? '  What the expert did:' : '', ...did]
       .filter(Boolean)
       .join('\n');
   });
@@ -145,7 +161,7 @@ async function planReplay(apiKey, skill) {
     fallbacks: 'default',
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: PLAN_SCHEMA } },
     system: PLAN_SYSTEM,
-    messages: [{ role: 'user', content: `Task: ${skill.map.title}\n${skill.map.summary}\n\n${steps.join('\n\n')}` }],
+    messages: [{ role: 'user', content: `Task: ${skill.map.title}\n${skill.map.summary}\n${prerequisitesText(skill.map)}\n\n${steps.join('\n\n')}` }],
   });
   if (response.stop_reason !== 'end_turn') throw new Error(`Couldn't plan the replay (${response.stop_reason}).`);
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
@@ -324,4 +340,4 @@ function describeError(err) {
   return Object.assign(new Error(err.message), { say });
 }
 
-module.exports = { Guide, describeScreen, describeSkill, findSkill, planReplay, locateTarget };
+module.exports = { Guide, describeScreen, describeSkill, findSkill, planReplay, locateTarget, destinationText };
