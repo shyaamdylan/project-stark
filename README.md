@@ -83,11 +83,16 @@ the orb turns gold. "Hey Friday" switches back.
 - **Press a button:** "Jarvis, click Share."
 - **The basics need no lesson:** "go to youtube.com", "search for flights to Rome", "type hello
   everyone", "press command S".
-- **Anything else, he has a go.** "I haven't been taught this one, sir, but I'm happy to have a
-  go…" He works it out from what's on screen, one action at a time, with the same safety checks
-  as a learned task. If he isn't confident he can do it properly (a company-specific process, a
-  judgment call, or it isn't working), he stops, at the start or halfway through, and says it
-  needs teaching.
+- **Anything else, he has a go.** He says what he'll try and gets on with it, working it out from
+  what's on screen one action at a time. Harmless steps need no "shall I?"; risky clicks and keys
+  still need your yes. He uses direct routes where they exist (opening files, apps and sites,
+  switching windows, reading a file's text) rather than clicking through menus. If he isn't
+  confident he can do it properly (a company-specific process, a judgment call, or it isn't
+  working), he stops, at the start or halfway through, and says it needs teaching.
+- **He never types or presses keys in a terminal.** For "get PianoScribe running" he reads the
+  README and tells you the commands to run yourself.
+- **Changed your mind?** "Wait, stop, I meant…" stops him and does what you said instead.
+- Misheard names ("Piano Scrap") are corrected against your project folders, apps and skills.
 - "How do I…" questions go to Friday, since that's learning rather than doing.
 
 **Safety.** Jarvis is careful by design:

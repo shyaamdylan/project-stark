@@ -342,4 +342,45 @@ function makeRephrase(apiKey, client = null) {
   };
 }
 
-module.exports = { findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, setPicksFile, rememberPick, makeRephrase };
+// Reading a file's text for Jarvis (a README to follow, notes to use), or
+// listing a folder. Same limits as opening: home folder only, nothing hidden
+// or in ~/Library, and nothing that looks like secrets.
+const SECRET_NAME = /(^|[._-])(env|secrets?|credentials?|passwords?|tokens?|keychain|id_rsa|id_ed25519|id_ecdsa)([._-]|$)|\.(pem|key|p12|pfx|keychain-db|kdbx)$/i;
+const MAX_READ = 200 * 1024;
+
+function readTextFile(file, { home = os.homedir(), maxChars = 8000 } = {}) {
+  let real;
+  let st;
+  try {
+    real = fs.realpathSync(file);
+    st = fs.statSync(real);
+  } catch {
+    return { ok: false, why: 'missing' };
+  }
+  const verdict = openVerdict(real, { isDirectory: st.isDirectory(), isFile: st.isFile(), mode: st.mode }, home);
+  if (!verdict.ok && verdict.why !== 'runs-code') return { ok: false, why: verdict.why };
+  if (SECRET_NAME.test(path.basename(real))) return { ok: false, why: 'secret' };
+  if (st.isDirectory()) {
+    const entries = fs.readdirSync(real, { withFileTypes: true }).filter((d) => !d.name.startsWith('.')).slice(0, 150);
+    return { ok: true, path: real, folder: true, text: entries.map((d) => `${d.name}${d.isDirectory() ? '/' : ''}`).join('\n') };
+  }
+  if (st.size > MAX_READ) return { ok: false, why: 'too-big' };
+  const buf = fs.readFileSync(real);
+  if (buf.includes(0)) return { ok: false, why: 'not-text' };
+  const text = buf.toString('utf8');
+  return { ok: true, path: real, folder: false, text: text.length > maxChars ? `${text.slice(0, maxChars)}\n…(cut short)` : text };
+}
+
+// "~/Documents/PianoScribe/README.md", "Documents/PianoScribe" or a
+// description ("the PianoScribe readme") -> a path in the home folder, or null.
+async function resolveFile(query, { home = os.homedir(), run } = {}) {
+  const q = String(query || '').trim();
+  if (/^(~|\/|[\w .-]+\/)/.test(q)) {
+    const p = q.startsWith('~') ? path.join(home, q.slice(1)) : q.startsWith('/') ? q : path.join(home, q);
+    if (fs.existsSync(p)) return p;
+  }
+  const [best] = await findFiles(q, { home, limit: 1, ...(run ? { run } : {}) });
+  return best && !best.blocked ? best.path : null;
+}
+
+module.exports = { readTextFile, resolveFile, findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, setPicksFile, rememberPick, makeRephrase };

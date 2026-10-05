@@ -102,3 +102,20 @@ test('a plain name still finds the file directly', async () => {
   assert.equal(found[0].name, 'Q3 Budget.xlsx');
   assert.equal(found.length, 1);
 });
+
+const { readTextFile } = require('../src/files');
+
+test('reading files: text and folders yes; secrets, hidden and outside no', () => {
+  const { home } = fakeHome(['Documents/PianoScribe/README.md', 'Documents/PianoScribe/.env', 'Documents/PianoScribe/credentials.json', '.ssh/id_ed25519']);
+  fs.writeFileSync(path.join(home, 'Documents/PianoScribe/README.md'), '# PianoScribe\nnpm install\nnpm start\n');
+  const readme = readTextFile(path.join(home, 'Documents/PianoScribe/README.md'), { home });
+  assert.ok(readme.ok);
+  assert.match(readme.text, /npm start/);
+  const folder = readTextFile(path.join(home, 'Documents/PianoScribe'), { home });
+  assert.ok(folder.folder);
+  assert.ok(!folder.text.includes('.env'));
+  assert.equal(readTextFile(path.join(home, 'Documents/PianoScribe/.env'), { home }).why, 'hidden');
+  assert.equal(readTextFile(path.join(home, 'Documents/PianoScribe/credentials.json'), { home }).why, 'secret');
+  assert.equal(readTextFile(path.join(home, '.ssh/id_ed25519'), { home }).why, 'hidden');
+  assert.equal(readTextFile('/etc/hosts', { home }).why, 'outside');
+});

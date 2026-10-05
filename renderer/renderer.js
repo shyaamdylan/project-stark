@@ -736,7 +736,18 @@ window.buddy.on('jarvis-step', (step) =>
   })
 );
 
+let afterStop = null; // what they asked for in the same breath as "stop"
 window.buddy.on('jarvis-state', (j) => {
+  if (!j.running && afterStop) {
+    const next = afterStop;
+    afterStop = null;
+    state.executing = false;
+    nextBtn.classList.remove('hidden');
+    guideBar.classList.add('hidden');
+    queueGuide(goHome);
+    setTimeout(() => handleAsk(next), 50);
+    return;
+  }
   if (j.running) {
     // Jarvis asks his questions, then works; steps arrive on 'jarvis-step'.
     if (state.guiding) stopGuide();
@@ -934,6 +945,10 @@ async function heard(wav, clip = {}) {
   if (state.executing && /\b(stop|cancel|abort|halt|stand down|hold on|wait)\b/i.test(raw)) {
     showCaption(raw);
     stopJarvis();
+    // "Wait, stop. I need you to get PianoScribe running": stop, then do that instead.
+    const after = raw.replace(/^.*\b(stop|cancel|abort|halt|stand down|hold on|wait)\b[\s,.!?-]*/i, '').trim();
+    const rest = splitWake(after).rest;
+    if (rest.split(/\s+/).filter((w) => /[a-z0-9]{2}/i.test(w)).length >= 3) afterStop = rest.replace(/[.!?]+$/, '');
     return;
   }
   if (Date.now() - state.lastSpokenAt < 15000 && similar(raw, state.lastSpoken)) return;
@@ -982,7 +997,8 @@ function updateMic() {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
       silenceMs: () => (state.listening ? 1100 : 1600),
-      minSpeechMs: () => (state.listening || state.answering ? 200 : 450),
+      // Short answers ("no", "yep") are fine; anything shorter is a cough or a click.
+      minSpeechMs: () => (state.listening ? 200 : state.answering ? 320 : 450),
       gain: () => (buddyEl.classList.contains('talking') ? 2.5 : 1),
       onStart: () => {
         // You started talking: the buddy stops and listens.

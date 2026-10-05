@@ -66,6 +66,9 @@ Reply with status "step" and the single next action:
 - "open_app": text is the app's name as it appears in Applications.
 - "open_file": text is a short description of a file to find and open ("Q3 budget spreadsheet").
 - "switch_to": text names an already-open window or browser tab to bring to the front ("budget spreadsheet", "YouTube").
+- "read_file": text is a path in the home folder ("~/Documents/PianoScribe/README.md") or a description ("the PianoScribe readme"). You get its text (or a folder's list of files) next turn. Use it to learn how something works instead of reading it off the screen.
+Prefer these direct actions (open_file, read_file, open_url, open_app, switch_to) over clicking through menus whenever they do the job: they're faster and more reliable.
+You never type or press keys in a terminal app, and never run shell commands. If a task needs commands run (setting up or starting a software project), read the instructions with read_file, then finish with status "done" and say exactly which commands the user should run, and in which folder, briefly.
 - "wait": give a page or app a moment to load.
 say: a few words in character on what you're doing ("Opening Safari."), spoken aloud, no markdown. On your first reply, summary is one sentence in character saying what you'll attempt; otherwise "".`;
 }
@@ -79,7 +82,7 @@ const SCHEMA = {
     action: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'open_file', 'switch_to', 'wait', 'none'] },
+        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'open_file', 'switch_to', 'read_file', 'wait', 'none'] },
         target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
         text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       },
@@ -102,12 +105,14 @@ class Improviser {
     this.inFlight = false;
   }
 
-  // Older screens are replaced by a placeholder: the latest ones are what matter.
+  // Older screens are replaced by a placeholder and long older notes (a file's
+  // text) are trimmed: the latest ones are what matter.
   messages() {
     const out = [];
     this.turns.forEach((t, i) => {
       const recent = i >= this.turns.length - KEEP_SCREENS;
-      out.push({ role: 'user', content: `${t.note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}` });
+      const note = recent || t.note.length <= 2500 ? t.note : `${t.note.slice(0, 2500)}\n…(trimmed)`;
+      out.push({ role: 'user', content: `${note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}` });
       if (t.reply) out.push({ role: 'assistant', content: t.reply });
     });
     return out;

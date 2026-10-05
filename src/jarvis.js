@@ -707,6 +707,11 @@ class JarvisRun {
 // Claude isn't confident ("needs_teaching"), at the start or halfway through.
 
 const { cleanUrl } = require('./apprentice');
+// He never types or presses keys in a terminal: that would be running commands
+// on the Mac. Commands a task needs are given to the user to run themselves.
+const TERMINALS = /^(Terminal|iTerm2?|Warp|Alacritty|kitty|WezTerm|Ghostty|Hyper)$/i;
+const inTerminal = (scan) => TERMINALS.test((scan && scan.app) || '');
+const NO_TERMINAL = "Refused: I don't type or press keys in a terminal. If the task needs commands, finish by telling the user exactly which to run (status done, with the commands in say).";
 
 class JarvisFreestyle extends JarvisRun {
   // deps as JarvisRun, minus skill/actions/plan, plus:
@@ -747,17 +752,12 @@ class JarvisFreestyle extends JarvisRun {
         continue;
       }
 
-      // Before the first action: say it's a best effort and get a yes.
+      // Before the first action: say what he's about to try, and get on with
+      // it. No up-front "shall I?": anything that matters (risky clicks and
+      // keys, every Terminal command, typing into a terminal) gets its own yes.
       if (!this.executing) {
-        const plan = r.summary || this.s(`I'll see what I can do{sir}.`);
-        const ok = await this.confirm(`${this.s("I haven't been taught this one{sir}, but I'm happy to have a go.")} ${plan} ${this.s('Shall I proceed?')}`);
-        if (!ok) {
-          this.stop('declined');
-          this.check();
-        }
         this.executing = true;
-        // The screen may have changed while he waited for the yes.
-        await this.scan();
+        if (r.summary) this.emit({ type: 'say', say: r.summary });
       }
 
       if (r.say) this.emit({ type: 'step', say: r.say, stepNo: step + 1, totalSteps: 0 });
@@ -800,6 +800,10 @@ class JarvisFreestyle extends JarvisRun {
           }
           return `The user filled in "${t.label}" themselves.`;
         }
+        if (inTerminal(this.latest)) {
+          this.record({ kind: 'refused', detail: `type into ${this.latest.app}`, value: text });
+          return NO_TERMINAL;
+        }
         if (t) await this.clickOn(t, 'focus');
         await this.doAct(async () => {
           if (t) await this.act.selectAll();
@@ -810,6 +814,10 @@ class JarvisFreestyle extends JarvisRun {
         return `Done: typed "${text}"${t ? ` into "${t.label}"` : ''}.`;
       }
       case 'keys': {
+        if (inTerminal(this.latest)) {
+          this.record({ kind: 'refused', detail: `keys in ${this.latest.app}`, value: r.text });
+          return NO_TERMINAL;
+        }
         const spec = parseShortcut(r.text);
         if (!spec) throw new Error(`I don't know the key "${r.text}"`);
         if (riskOf({ kind: 'shortcut', keys: r.text }) && !(await this.confirm(this.s(`That would press ${spokenKeys(r.text)}. Shall I go ahead{sir}?`)))) {
@@ -858,6 +866,12 @@ class JarvisFreestyle extends JarvisRun {
         if (!which) throw new Error(`nothing open matches "${r.text}"`);
         await this.wait(SETTLE_MS);
         return `Done: brought ${which} to the front.`;
+      }
+      case 'read_file': {
+        const got = this.act.readFile ? await this.act.readFile(r.text || '') : { ok: false, why: 'unavailable' };
+        this.record({ kind: 'read', detail: got.ok ? got.path : `couldn't read "${r.text}" (${got.why})` });
+        if (!got.ok) throw new Error(got.why === 'secret' ? `"${r.text}" looks like it holds secrets, so I won't read it` : `couldn't read "${r.text}" (${got.why})`);
+        return `${got.folder ? 'Folder' : 'File'} ${got.path}${got.folder ? ' contains' : ' says'}:\n${got.text}`;
       }
       case 'wait':
         await this.wait(2000);

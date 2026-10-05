@@ -17,8 +17,9 @@ const { Replay, buildActions } = require('./src/replay');
 const { JarvisRun, JarvisFreestyle, planRun, riskOf, isYes } = require('./src/jarvis');
 const { Improviser, ImprovisedWalkthrough } = require('./src/improvise');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
-const { findFiles, isClear, parseQuery, appRoots, setPicksFile, rememberPick, makeRephrase } = require('./src/files');
+const { readTextFile, resolveFile, findFiles, isClear, parseQuery, appRoots, setPicksFile, rememberPick, makeRephrase } = require('./src/files');
 const windows = require('./src/windows');
+const { correctNames, knownNames } = require('./src/names');
 const act = require('./src/act');
 const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
@@ -214,7 +215,12 @@ ipcMain.handle('ask', async (_e, rawText, who) => {
   try {
     const { agent: named, rest } = splitWake(rawText);
     setAgent(named || who);
-    return await (agent === 'jarvis' ? askJarvis(rest) : ask(rest));
+    // Speech-to-text gets project names wrong ("Piano Scrap"): fix them against
+    // names it knows (project folders, apps, learned skills).
+    const fixed = correctNames(tidySpeech(rest), knownNames({ extra: learnedSkills().map((sk) => sk.title) }));
+    if (fixed.fixes.length) console.log('[ask] heard', fixed.fixes.map(([a, b]) => `"${a}" as ${b}`).join(', '));
+    if (!/[a-z0-9]{2}/i.test(fixed.text)) return { ok: false, reason: 'empty', say: persona(agent, cfg).s("Sorry{sir}, I didn't catch that.") };
+    return await (agent === 'jarvis' ? askJarvis(fixed.text) : ask(fixed.text));
   } catch (err) {
     console.error('[ask]', err);
     return { ok: false, reason: 'error', say: persona(agent, cfg).s('Something went wrong{sir}. Try again.') };
@@ -611,6 +617,15 @@ const hands = {
     await shell.openExternal(safe);
     console.log(`[jarvis] opened ${safe}`);
   },
+  // A file's text or a folder's contents, for following a README. Home folder
+  // only, nothing hidden or secret-looking (src/files.js).
+  readFile: async (query) => {
+    const file = await resolveFile(query);
+    if (!file) return { ok: false, why: 'not found' };
+    const got = readTextFile(file);
+    console.log(`[jarvis] read ${file}${got.ok ? '' : ` (refused: ${got.why})`}`);
+    return got;
+  },
   // Best matching file, opened with its usual app (no questions: he's mid-task).
   openFile: async (query) => {
     const [f] = await findFiles(query, { limit: 1 });
@@ -642,6 +657,8 @@ const OPEN_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:open|launch|st
 const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|tap|hit)\s+(?:on\s+)?(?:the\s+)?(.+?)(?:\s+(?:button|link|tab))?(?:\s+for me)?(?:\s+please)?$/i;
 // "open the File menu" is about the screen, not a file.
 const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
+// Words that say "a file": an extension, or file-ish nouns.
+const FILEISH = /\.\w{1,5}\b|\b(file|folder|document|doc|readme|pdf|spreadsheet|sheet|deck|slides|presentation|screenshot|photo|image|video|notes?)\b/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
 // "Switch to the budget spreadsheet": an open window or tab, brought to the front.
 const SWITCH_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:switch(?: back)? to|go(?: back)? to|bring (?:up|back)|focus(?: on)?|jump to|take me to|show me|get me|pull up|flip to|change to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:window|tab))?(?:\s+for me)?(?:\s+please)?$/i;
@@ -692,6 +709,8 @@ async function jarvisBasics(text, p) {
 // request reads the way it was meant.
 function tidySpeech(text) {
   return String(text || '')
+    // A false start: "Find-- open the README" means "open the README".
+    .replace(/^\s*[\w']+(?:\s+[\w']+)?\s*(?:--|—|–)\s*/, '')
     .replace(/\b(um+|uh+|erm|er|hmm+|like)\b,?/gi, ' ')
     .replace(/(\w),(\s)/g, '$1$2')
     .replace(/\s+/g, ' ')
@@ -741,7 +760,16 @@ async function askJarvis(raw) {
     const res = await openFileRequest(find[1], p, { reveal: !/\band open\b/i.test(find[1]) });
     if (res) return res;
   }
+  // "Could you please just open the README.md for PianoScribe": a file asked
+  // for mid-sentence still takes the quick route, no Claude needed.
+  const late = !find && !sw && !open && /\b(open|pull up|bring up)\s+(?:up\s+)?(.+)$/i.exec(text);
+  if (late && FILEISH.test(late[2]) && !UI_WORDS.test(late[2])) {
+    const res = await openFileRequest(late[2].replace(/\s+(?:for me|please)$/i, ''), p);
+    if (res) return res;
+  }
 
+  // The skill lookup (Claude) and the screen scan don't depend on each other: do both at once.
+  const looking = scanForAsk();
   if (Guide.available(cfg)) {
     let found = null;
     try {
@@ -758,7 +786,7 @@ async function askJarvis(raw) {
     }
   }
 
-  const { scan, reply } = await scanForAsk();
+  const { scan, reply } = await looking;
   if (reply) return { ...reply, say: p.s(`${reply.say.replace(/\.$/, '')}{sir}.`) };
   const clickable = scan.elements.filter((e) => CLICKABLE_ROLES.has(e.role) && !e.hidden);
 

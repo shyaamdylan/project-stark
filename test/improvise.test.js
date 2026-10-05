@@ -46,25 +46,39 @@ function freestyle(turns, { answers = [], screen = () => ({ app: 'Safari', eleme
   return { run, did, asked, brain };
 }
 
-test('Jarvis: says he was not taught it, asks for a yes, then does it', async () => {
-  const { run, did, asked } = freestyle(
-    [
-      (s) => ({ status: 'step', kind: 'open_app', text: 'Safari', summary: "I'll open Safari and show your downloads.", say: 'Opening Safari.' }),
-      (s) => ({ status: 'step', kind: 'click', target: s.elements[0], say: 'Downloads.' }),
-      { status: 'done', say: 'There they are.' },
-    ],
-    { answers: ['yes'] }
-  );
+test('Jarvis: says what he will try and gets on with it, no "shall I?" for harmless steps', async () => {
+  const said = [];
+  const { run, did, asked } = freestyle([
+    (s) => ({ status: 'step', kind: 'open_app', text: 'Safari', summary: "I'll open Safari and show your downloads.", say: 'Opening Safari.' }),
+    (s) => ({ status: 'step', kind: 'click', target: s.elements[0], say: 'Downloads.' }),
+    { status: 'done', say: 'There they are.' },
+  ]);
+  run.emit = (ev) => ev.say && said.push(ev.say);
   const res = await run.run();
   assert.equal(res.status, 'done');
-  assert.match(asked[0].text, /haven't been taught/);
+  assert.equal(said[0], "I'll open Safari and show your downloads.");
+  assert.deepEqual(asked, []);
   assert.deepEqual(did, ['app Safari', 'click Downloads']);
 });
 
-test("Jarvis: nothing happens if you don't say yes", async () => {
-  const { run, did } = freestyle([{ status: 'step', kind: 'open_url', text: 'apple.com', say: 'Opening.' }], { answers: ['no'] });
-  assert.equal((await run.run()).status, 'stopped');
+test('Jarvis: reads a file directly instead of off the screen, and gets its text next turn', async () => {
+  const { run, brain } = freestyle([{ status: 'step', kind: 'read_file', text: '~/Documents/PianoScribe/README.md', say: 'Reading.' }, { status: 'done', say: 'Run npm install, then npm start.' }]);
+  run.act.readFile = async (q) => ({ ok: true, path: '/Users/me/Documents/PianoScribe/README.md', folder: false, text: '## Run it\nnpm install\nnpm start' });
+  const res = await run.run();
+  assert.equal(res.status, 'done');
+  assert.match(brain.notes[1], /npm start/);
+});
+
+test('Jarvis: never types or presses keys in a terminal', async () => {
+  const { run, did, brain } = freestyle(
+    [{ status: 'step', kind: 'type', text: 'npm start', say: 'Typing.' }, { status: 'step', kind: 'keys', text: 'Enter', say: 'Enter.' }, { status: 'done', say: 'Run npm start yourself.' }],
+    { screen: () => ({ app: 'Terminal', elements: [] }) }
+  );
+  const res = await run.run();
+  assert.equal(res.status, 'done');
   assert.deepEqual(did, []);
+  assert.match(brain.notes[1], /don't type or press keys in a terminal/);
+  assert.match(brain.notes[2], /don't type or press keys in a terminal/);
 });
 
 test('Jarvis: honest "needs teaching" at the start, before touching anything', async () => {
@@ -79,8 +93,7 @@ test('Jarvis: honest "needs teaching" at the start, before touching anything', a
 
 test('Jarvis: "needs teaching" halfway through stops there', async () => {
   const { run, did } = freestyle(
-    [(s) => ({ status: 'step', kind: 'click', target: s.elements[0], say: 'Downloads.' }), { status: 'needs_teaching', say: "I don't know which folder your team files these in." }],
-    { answers: ['yes'] }
+    [(s) => ({ status: 'step', kind: 'click', target: s.elements[0], say: 'Downloads.' }), { status: 'needs_teaching', say: "I don't know which folder your team files these in." }]
   );
   const res = await run.run();
   assert.equal(res.status, 'needs_teaching');
@@ -94,7 +107,7 @@ test('Jarvis: risky clicks still need their own yes, and he never types a passwo
       (s) => ({ status: 'step', kind: 'type', target: s.elements[2], text: 'hunter2', say: 'Typing.' }),
       (s) => ({ status: 'step', kind: 'click', target: s.elements[1], say: 'Sending.' }),
     ],
-    { answers: ['yes', 'done', 'no'] }
+    { answers: ['done', 'no'] }
   );
   const res = await run.run();
   assert.equal(res.status, 'stopped');
@@ -108,7 +121,7 @@ test('Jarvis: asks for what only you know, then carries on with the answer', asy
 });
 
 test('Jarvis: two failed actions in a row and he says it needs teaching', async () => {
-  const { run } = freestyle([{ status: 'step', kind: 'open_app', text: 'Nope', say: 'Opening.' }, { status: 'step', kind: 'open_app', text: 'Nope', say: 'Opening.' }], { answers: ['yes'] });
+  const { run } = freestyle([{ status: 'step', kind: 'open_app', text: 'Nope', say: 'Opening.' }, { status: 'step', kind: 'open_app', text: 'Nope', say: 'Opening.' }]);
   const res = await run.run();
   assert.equal(res.status, 'needs_teaching');
 });
