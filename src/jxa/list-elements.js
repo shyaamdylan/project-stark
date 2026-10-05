@@ -157,6 +157,9 @@ function list(o) {
   return out;
 }
 
+// Roles whose name, when they have none of their own, comes from what's inside them.
+var NAMED_BY_CONTENT = { AXButton: 1, AXLink: 1, AXMenuButton: 1, AXPopUpButton: 1, AXHeading: 1, AXTab: 1, AXRadioButton: 1, AXCheckBox: 1, AXMenuItem: 1, AXCell: 1, AXRow: 1 };
+
 // Ask a web page for its elements of one kind (WebKit and Chromium both answer
 // this; it's how VoiceOver's rotor lists links and form controls).
 var WEB_KEYS = ['AXControlSearchKey', 'AXLinkSearchKey', 'AXHeadingSearchKey'];
@@ -438,12 +441,10 @@ function run(argv) {
     if (!INTERESTING[role] || hidden(p[0] + s[0] / 2, p[1] + s[1] / 2, win.z)) return role;
     var label = str(n.title) || str(n.desc);
     if (!label && (role === 'AXStaticText' || role === 'AXLink' || role === 'AXCell')) label = str(n.value);
-    if (!label && (role === 'AXButton' || role === 'AXLink' || role === 'AXMenuButton' || role === 'AXPopUpButton' || role === 'AXHeading')) {
-      // Unlabelled button: borrow text from inside it, then its tooltip.
-      label = str(list(n.children).map(function (c) {
-        var cn = node(c);
-        return cn && cn.role === 'AXStaticText' ? cn.value || cn.title : '';
-      }).join(' '));
+    if (!label && NAMED_BY_CONTENT[role]) {
+      // Unlabelled button or link: name it from what's inside, as a screen
+      // reader does (text and icon descriptions, a few levels down), then its tooltip.
+      label = innerName(n);
       if (!label) label = str(n.help);
     }
     // A control labelled by separate text ("Name:" beside a field, the words next to a checkbox).
@@ -459,6 +460,22 @@ function run(argv) {
       elements.push(el);
     }
     return role;
+  }
+
+  // The words inside an element: text and icon descriptions up to a few levels
+  // down (sites wrap a link's "Search" label in several boxes).
+  function innerName(n) {
+    var parts = [];
+    var queue = list(n.children).map(function (c) { return { el: c, depth: 1 }; });
+    for (var i = 0; i < queue.length && i < 24 && parts.length < 4; i++) {
+      var cn = node(queue[i].el);
+      if (!cn) continue;
+      var t = cn.role === 'AXStaticText' ? cn.value || cn.title : cn.role === 'AXImage' ? cn.desc || cn.title : cn.title || cn.desc;
+      t = str(t);
+      if (t && parts.indexOf(t) < 0) parts.push(t);
+      else if (queue[i].depth < 4) list(cn.children).forEach(function (c) { queue.push({ el: c, depth: queue[i].depth + 1 }); });
+    }
+    return str(parts.join(' '));
   }
 
   // Breadth-first walk (per window). Each node is clipped to the intersection of
