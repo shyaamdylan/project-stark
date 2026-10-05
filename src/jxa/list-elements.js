@@ -89,6 +89,34 @@ function screenWindows(excludePid) {
   return out;
 }
 
+// Some apps draw part of a window as a separate on-screen window: a browser's
+// toolbar in full screen, a tab strip, an overlay bar. Accessibility doesn't
+// list those as windows. An app window that accessibility doesn't know and that
+// lies inside another of the same app's windows is part of that window, so it's
+// dropped: otherwise it can pass for the front window (a thin strip) and bury
+// the real one under it.
+function dropWindowParts(wins, appEl) {
+  var inside = function (a, b) { return a.x >= b.x - 1 && a.y >= b.y - 1 && a.x + a.w <= b.x + b.w + 1 && a.y + a.h <= b.y + b.h + 1; };
+  var suspects = wins.filter(function (w) {
+    return !w.float && wins.some(function (o) { return o !== w && o.pid === w.pid && !o.float && inside(w, o) && o.w * o.h > w.w * w.h; });
+  });
+  if (!suspects.length) return wins;
+  var frames = {};
+  var known = function (w) {
+    if (!frames[w.pid]) {
+      frames[w.pid] = [];
+      list(safe(function () { return getAttr(appEl(w.pid), 'AXWindows'); }, null)).forEach(function (x) {
+        var n = node(x);
+        if (n && n.pos && n.size) frames[w.pid].push({ x: n.pos[0], y: n.pos[1], w: n.size[0], h: n.size[1] });
+      });
+    }
+    return frames[w.pid].some(function (f) { return Math.abs(f.x - w.x) < 2 && Math.abs(f.y - w.y) < 2 && Math.abs(f.w - w.w) < 2 && Math.abs(f.h - w.h) < 2; });
+  };
+  var out = wins.filter(function (w) { return suspects.indexOf(w) < 0 || known(w); });
+  out.forEach(function (w, i) { w.z = i; });
+  return out;
+}
+
 // The app you're working in owns the front normal window (a floating panel
 // from some other app doesn't make that app "front").
 function frontWindow(wins) {
@@ -318,6 +346,11 @@ function run(argv) {
   var started = Date.now();
   var wins = screenWindows(excludePid);
   if (!wins.length) return JSON.stringify({ error: 'no-window', message: 'No app window found on screen.' });
+  var appEls = {};
+  wins = dropWindowParts(wins, function (pid) {
+    if (!appEls[pid]) { appEls[pid] = $.AXUIElementCreateApplication(pid); $.AXUIElementSetMessagingTimeout(appEls[pid], 1.0); }
+    return appEls[pid];
+  });
   var owner = frontWindow(wins);
 
   var apps = [];
