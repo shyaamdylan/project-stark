@@ -33,12 +33,13 @@ ObjC.bindFunction('AXUIElementCopyAttributeValue', ['int', ['id', 'id', 'id*']])
 ObjC.bindFunction('AXUIElementCopyMultipleAttributeValues', ['int', ['id', 'id', 'int', 'id*']]);
 ObjC.bindFunction('AXUIElementSetAttributeValue', ['int', ['id', 'id', 'id']]);
 ObjC.bindFunction('AXUIElementSetMessagingTimeout', ['int', ['id', 'float']]);
+ObjC.bindFunction('AXUIElementCopyParameterizedAttributeValue', ['int', ['id', 'id', 'id', 'id*']]);
 
 var INTERESTING = {
   AXButton: 1, AXMenuButton: 1, AXPopUpButton: 1, AXCheckBox: 1, AXRadioButton: 1,
   AXLink: 1, AXMenuBarItem: 1, AXTab: 1, AXDisclosureTriangle: 1, AXComboBox: 1,
   AXTextField: 1, AXSearchField: 1, AXSlider: 1, AXIncrementor: 1, AXColorWell: 1, AXTextArea: 1,
-  AXStaticText: 1, AXImage: 1, AXCell: 1, AXRow: 1, AXMenuItem: 1, AXDockItem: 1,
+  AXStaticText: 1, AXImage: 1, AXCell: 1, AXRow: 1, AXMenuItem: 1, AXDockItem: 1, AXHeading: 1,
 };
 // Don't descend into these: their children are just decoration.
 var LEAF = {
@@ -57,12 +58,18 @@ var HAS_VALUE = {
   AXRadioButton: 1, AXSlider: 1, AXTextArea: 1, AXIncrementor: 1,
 };
 
-// Order matters: node() below reads these by index.
+// Order matters: node() below reads these by index. AXTitleUIElement is the
+// separate text that labels a control (a form field's "Name:" to its left).
 var ATTRS = $(['AXRole', 'AXSubrole', 'AXTitle', 'AXDescription', 'AXValue', 'AXPosition', 'AXSize',
-  'AXChildren', 'AXHelp', 'AXPlaceholderValue']);
+  'AXChildren', 'AXHelp', 'AXPlaceholderValue', 'AXTitleUIElement']);
+
+// Window levels that hold things people click: normal windows (0), and the
+// floating panels, popovers and utility palettes that sit above them (3, 8, 19).
+// Menus (101) are read separately; the menu bar, Dock and overlays are not here.
+var WINDOW_LAYERS = { 0: 1, 3: 1, 8: 1, 19: 1 };
 
 // Visible app windows, front to back. Owner name/PID and bounds don't need
-// Screen Recording permission.
+// Screen Recording permission. `float` marks panels above the normal windows.
 function screenWindows(excludePid) {
   // 1 = OnScreenOnly, 16 = ExcludeDesktopElements, 0 = kCGNullWindowID.
   var ref = $.CGWindowListCopyWindowInfo(1 | 16, 0);
@@ -70,14 +77,23 @@ function screenWindows(excludePid) {
   var out = [];
   for (var i = 0; i < list.length; i++) {
     var w = list[i];
-    if (w.kCGWindowLayer !== 0) continue;
+    if (!WINDOW_LAYERS[w.kCGWindowLayer]) continue;
     if (w.kCGWindowOwnerPID === excludePid) continue;
     var b = w.kCGWindowBounds;
-    if (!b || b.Width < 60 || b.Height < 60) continue;
+    var float = w.kCGWindowLayer !== 0;
+    var min = float ? 20 : 60;
+    if (!b || b.Width < min || b.Height < min) continue;
     if (w.kCGWindowAlpha === 0) continue;
-    out.push({ pid: w.kCGWindowOwnerPID, name: w.kCGWindowOwnerName, z: out.length, x: b.X, y: b.Y, w: b.Width, h: b.Height });
+    out.push({ pid: w.kCGWindowOwnerPID, name: w.kCGWindowOwnerName, z: out.length, x: b.X, y: b.Y, w: b.Width, h: b.Height, float: float });
   }
   return out;
+}
+
+// The app you're working in owns the front normal window (a floating panel
+// from some other app doesn't make that app "front").
+function frontWindow(wins) {
+  for (var i = 0; i < wins.length; i++) if (!wins[i].float) return wins[i];
+  return wins[0];
 }
 
 // Apps that may own menu bar status icons. Background-only processes
@@ -141,6 +157,23 @@ function list(o) {
   return out;
 }
 
+// Ask a web page for its elements of one kind (WebKit and Chromium both answer
+// this; it's how VoiceOver's rotor lists links and form controls).
+var WEB_KEYS = ['AXControlSearchKey', 'AXLinkSearchKey', 'AXHeadingSearchKey'];
+function webSearch(el, key, limit) {
+  return safe(function () {
+    var params = $.NSMutableDictionary.dictionary;
+    params.setObjectForKey($(key), $('AXSearchKey'));
+    params.setObjectForKey($.NSNumber.numberWithInt(limit), $('AXResultsLimit'));
+    params.setObjectForKey($('AXDirectionNext'), $('AXDirection'));
+    params.setObjectForKey($.NSNumber.numberWithBool(true), $('AXVisibleOnly'));
+    params.setObjectForKey($.NSNumber.numberWithBool(false), $('AXImmediateDescendantsOnly'));
+    var r = Ref();
+    if ($.AXUIElementCopyParameterizedAttributeValue(el, $('AXUIElementsForSearchPredicate'), params, r) !== 0) return [];
+    return list($(r[0]));
+  }, []);
+}
+
 // AXValue structs aren't reachable through the bridge, but their description is
 // "<AXValue 0x…> {value = x:10.000000 y:45.000000 type = kAXValueCGPointType}".
 function pair(o, a, b) {
@@ -166,6 +199,7 @@ function node(el) {
     children: v.objectAtIndex(7),
     help: text(v.objectAtIndex(8)),
     placeholder: text(v.objectAtIndex(9)),
+    titleUI: v.count > 10 ? v.objectAtIndex(10) : null,
   };
 }
 
@@ -278,9 +312,10 @@ function run(argv) {
 
   if (!$.AXIsProcessTrusted()) throw new Error('AX error -25211: assistive access not allowed');
 
+  var started = Date.now();
   var wins = screenWindows(excludePid);
   if (!wins.length) return JSON.stringify({ error: 'no-window', message: 'No app window found on screen.' });
-  var owner = wins[0];
+  var owner = frontWindow(wins);
 
   var apps = [];
   var byPid = {};
@@ -393,6 +428,39 @@ function run(argv) {
     return false;
   }
 
+  // Keep one element if it's a kind people use and it has a name, working out
+  // the name the way a screen reader would. Returns its role.
+  function consider(n, win) {
+    var p = n.pos, s = n.size;
+    var role = n.role;
+    if (n.subrole === 'AXSearchField') role = 'AXSearchField';
+    if (n.subrole === 'AXTabButton') role = 'AXTab';
+    if (!INTERESTING[role] || hidden(p[0] + s[0] / 2, p[1] + s[1] / 2, win.z)) return role;
+    var label = str(n.title) || str(n.desc);
+    if (!label && (role === 'AXStaticText' || role === 'AXLink' || role === 'AXCell')) label = str(n.value);
+    if (!label && (role === 'AXButton' || role === 'AXLink' || role === 'AXMenuButton' || role === 'AXPopUpButton' || role === 'AXHeading')) {
+      // Unlabelled button: borrow text from inside it, then its tooltip.
+      label = str(list(n.children).map(function (c) {
+        var cn = node(c);
+        return cn && cn.role === 'AXStaticText' ? cn.value || cn.title : '';
+      }).join(' '));
+      if (!label) label = str(n.help);
+    }
+    // A control labelled by separate text ("Name:" beside a field, the words next to a checkbox).
+    if (!label && !isNil(n.titleUI)) {
+      var tn = safe(function () { return node(n.titleUI); }, null);
+      if (tn) label = str(tn.value) || str(tn.title) || str(tn.desc);
+    }
+    if (!label && (role === 'AXTextField' || role === 'AXSearchField' || role === 'AXComboBox' || role === 'AXTextArea')) label = str(n.placeholder);
+    if (!label && HAS_VALUE[role]) label = str(n.help);
+    if (label) {
+      var el = { role: role, label: label, app: win.name, z: win.z, x: p[0], y: p[1], w: s[0], h: s[1] };
+      if (HAS_VALUE[role]) el.value = str(n.value);
+      elements.push(el);
+    }
+    return role;
+  }
+
   // Breadth-first walk (per window). Each node is clipped to the intersection of
   // its ancestors' frames, so content scrolled out of a list or panel is skipped
   // even when it's still inside the window's frame.
@@ -408,27 +476,23 @@ function run(argv) {
     if (!intersects(p[0], p[1], s[0], s[1], item.clip)) continue;
     if (buried(p[0], p[1], s[0], s[1], item.win.z)) continue;
 
-    var role = n.role;
-    if (n.subrole === 'AXSearchField') role = 'AXSearchField';
-    if (n.subrole === 'AXTabButton') role = 'AXTab';
+    var role = consider(n, item.win);
 
-    if (INTERESTING[role] && !hidden(p[0] + s[0] / 2, p[1] + s[1] / 2, item.win.z)) {
-      var label = str(n.title) || str(n.desc);
-      if (!label && (role === 'AXStaticText' || role === 'AXLink' || role === 'AXCell')) label = str(n.value);
-      if (!label && (role === 'AXButton' || role === 'AXLink' || role === 'AXMenuButton' || role === 'AXPopUpButton')) {
-        // Unlabelled button: borrow text from inside it, then its tooltip.
-        label = str(list(n.children).map(function (c) {
-          var cn = node(c);
-          return cn && cn.role === 'AXStaticText' ? cn.value || cn.title : '';
-        }).join(' '));
-        if (!label) label = str(n.help);
-      }
-      if (!label && (role === 'AXTextField' || role === 'AXSearchField' || role === 'AXComboBox' || role === 'AXTextArea')) label = str(n.placeholder);
-      if (label) {
-        var el = { role: role, label: label, app: item.win.name, z: item.win.z, x: p[0], y: p[1], w: s[0], h: s[1] };
-        if (HAS_VALUE[role]) el.value = str(n.value);
-        elements.push(el);
-      }
+    // A web page (Safari, Chrome, Electron apps): its buttons are buried 15-30
+    // levels deep in layout boxes, so walking can run out of time before
+    // reaching them. Ask the page for its controls, links and headings directly,
+    // the way VoiceOver does; the walk below still adds whatever else it reaches.
+    if (role === 'AXWebArea' && !item.searched) {
+      WEB_KEYS.forEach(function (key) {
+        webSearch(item.el, key, 400).forEach(function (r) {
+          var rn = node(r);
+          visited++;
+          if (!rn || !rn.pos || !rn.size || rn.size[0] < 2 || rn.size[1] < 2) return;
+          if (!intersects(rn.pos[0], rn.pos[1], rn.size[0], rn.size[1], item.clip)) return;
+          if (buried(rn.pos[0], rn.pos[1], rn.size[0], rn.size[1], item.win.z)) return;
+          consider(rn, item.win);
+        });
+      });
     }
 
     if (!LEAF[role]) {
@@ -455,8 +519,17 @@ function run(argv) {
   var fen = isNil(fe) ? null : node(fe);
   var focused = fen ? { role: fen.role, label: str(fen.title || fen.desc || fen.placeholder || fen.help), value: fen.value ? str(fen.value) : '' } : null;
 
+  // The page search and the walk can both find the same thing: keep one.
+  var seen = {};
+  elements = elements.filter(function (e) {
+    var k = e.role + '|' + e.label + '|' + Math.round(e.x) + '|' + Math.round(e.y);
+    if (seen[k]) return false;
+    seen[k] = 1;
+    return true;
+  });
+
   return JSON.stringify({
     app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', focused: focused, apps: apps.map(function (a) { return a.name; }),
-    statusPids: statusPids, visited: visited, truncated: truncated, elements: elements,
+    statusPids: statusPids, visited: visited, truncated: truncated, ms: Date.now() - started, elements: elements,
   });
 }

@@ -37,6 +37,19 @@ function runJxa(opts, timeoutMs = 15000) {
 const STATUS_TTL_MS = 5 * 60 * 1000;
 let statusCache = null; // { pids, at }
 
+// A scan that ran out of time or elements has missed things: say so (at most
+// every 15 seconds per app), so "it can't see X" can be told apart from "X has no name".
+const warnedAt = new Map();
+function reportScan(result, kind) {
+  if (!result || !result.truncated) return result;
+  const last = warnedAt.get(result.app) || 0;
+  if (Date.now() - last > 15000) {
+    warnedAt.set(result.app, Date.now());
+    console.warn(`[scan] ${kind} scan of ${result.app} stopped early (${result.visited} items in ${result.ms} ms, ${result.elements.length} kept): anything deeper was missed`);
+  }
+  return result;
+}
+
 async function scanFrontApp({ activate = true } = {}) {
   const fresh = statusCache && Date.now() - statusCache.at < STATUS_TTL_MS;
   const result = await runJxa({
@@ -44,13 +57,13 @@ async function scanFrontApp({ activate = true } = {}) {
     statusPids: fresh ? statusCache.pids : undefined,
   });
   if (!fresh && result.statusPids) statusCache = { pids: result.statusPids, at: Date.now() };
-  return result;
+  return reportScan(result, 'full');
 }
 
 // Just the front app, for watching someone work: skips the Dock, status icons
 // and other apps' windows, so it can run every second.
-function scanFrontWindow() {
-  return runJxa({ excludePid: process.pid, frontOnly: true, timeoutMs: 2500, maxElements: 4000 }, 6000);
+async function scanFrontWindow() {
+  return reportScan(await runJxa({ excludePid: process.pid, frontOnly: true, timeoutMs: 2500, maxElements: 4000 }, 6000), 'front-window');
 }
 
 // A cheap summary of the screen's state (windows, focus, open menu). Compare two

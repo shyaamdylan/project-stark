@@ -1506,11 +1506,34 @@ function buildTrayMenu() {
         click: (item) => setWake(item.checked),
       },
       { label: 'Open Skills Hub', click: () => openHub() },
+      { label: 'What can you see? (debug)', click: () => dumpScan() },
       { label: 'Open Accessibility settings', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
       { label: 'Open folder for .env (API keys)', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' },
       { label: 'Quit Project Stark', role: 'quit' },
     ]);
+}
+
+// Everything the scan sees in the front app, as a text file, for "why can't it see X?".
+async function dumpScan() {
+  try {
+    await refocusFrontApp();
+    await new Promise((r) => setTimeout(r, 300));
+    const s = await scanFrontWindow();
+    if (s.error) throw new Error(s.message || s.error);
+    const lines = [
+      `${s.app} — "${s.window || ''}"   ${s.elements.length} items kept, ${s.visited} looked at, ${s.ms} ms${s.truncated ? '   STOPPED EARLY: deeper items were missed' : ''}`,
+      s.focused ? `Typing in: ${s.focused.role} "${s.focused.label}"${s.focused.value ? ` = "${s.focused.value}"` : ''}` : 'Typing in: nothing',
+      '',
+      ...s.elements.map((e) => `${e.role.replace(/^AX/, '').padEnd(14)} ${JSON.stringify(e.label)}${'value' in e ? ` = ${JSON.stringify(e.value)}` : ''}   @${Math.round(e.x)},${Math.round(e.y)}${e.hidden ? ' (hidden)' : ''}`),
+    ];
+    const file = path.join(app.getPath('userData'), 'what-i-can-see.txt');
+    fs.writeFileSync(file, lines.join('\n'));
+    shell.openPath(file);
+    console.log(`[scan] wrote ${file}`);
+  } catch (err) {
+    console.error('[scan] debug dump', err.message);
+  }
 }
 
 function createTray() {
