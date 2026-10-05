@@ -316,7 +316,25 @@ async function cursorToSpark(at) {
 
 // Send the cursor to a rect: squeezed out of the orb the first time, hopping
 // straight from the last target after that.
+// After pointing at something, the cursor lingers there for a while instead
+// of flying straight home: if the next answer points somewhere too, it glides
+// from where it is rather than going back into the orb and out again.
+const LINGER_MS = 12000;
+let homeTimer = null;
+let homing = null; // the trip home in progress, if any
+
+function goHomeLater(ms = LINGER_MS) {
+  clearTimeout(homeTimer);
+  if (!state.pointerAt) return;
+  homeTimer = setTimeout(() => {
+    // Not while it's busy pointing out a lesson step or Jarvis's next click.
+    if (!state.guiding && !state.executing && !state.busy) goHome();
+  }, ms);
+}
+
 async function pointTo(rect, label, taps = 3) {
+  clearTimeout(homeTimer);
+  if (homing) await homing; // already on its way back: let it land, then go out again
   const center = { x: rect.x + rect.w / 2, y: Math.max(4, rect.y + rect.h / 2) };
   if (state.pointerAt) {
     spot.classList.add('hidden');
@@ -334,15 +352,23 @@ async function pointTo(rect, label, taps = 3) {
 
 // Bring the cursor home and melt it back into the orb.
 async function goHome() {
+  clearTimeout(homeTimer);
   if (!state.pointerAt) return;
   const from = state.pointerAt;
   state.pointerAt = null;
-  spot.classList.add('hidden');
-  await cursorToSpark(from);
-  await flySpark(from, state.exit);
-  spark.classList.add('hidden');
-  await absorb(state.exit);
-  clearPointing();
+  homing = (async () => {
+    spot.classList.add('hidden');
+    await cursorToSpark(from);
+    await flySpark(from, state.exit);
+    spark.classList.add('hidden');
+    await absorb(state.exit);
+    clearPointing();
+  })();
+  try {
+    await homing;
+  } finally {
+    homing = null;
+  }
 }
 
 function showSpot(rect, label) {
@@ -629,10 +655,7 @@ async function runAsk(text, request = () => window.buddy.ask(text, state.agent))
   if (res.sayOnly) {
     // Done in one go (opened a file, pressed a button): just say so.
     await say(res.say, { mood: 'happy', hold: 1500 });
-    if (res.home) {
-      await sleep(600);
-      await goHome();
-    }
+    if (res.home) goHomeLater();
     return;
   }
 
@@ -654,7 +677,7 @@ async function runAsk(text, request = () => window.buddy.ask(text, state.agent))
   await say(res.say, { mood: 'happy', hold: 2500 });
   await sleep(1500);
   hideBubbleIfIdle();
-  await goHome();
+  goHomeLater(); // stays out a while, in case the next question points somewhere too
 }
 
 // ---------- guided walkthroughs ----------
@@ -713,7 +736,7 @@ async function showGuideStep(step) {
   guideNote.classList.add('hidden');
   openConvo();
   if (step.status === 'done') flare();
-  await goHome();
+  goHomeLater();
   await say(step.say, { mood: step.status === 'done' ? 'happy' : 'worried', hold: 2000 });
 }
 
@@ -834,7 +857,7 @@ window.buddy.on('jarvis-state', (j) => {
   openConvo();
   queueGuide(async () => {
     if (j.status === 'done') flare();
-    await goHome();
+    goHomeLater();
     if (j.say) await say(j.say, { mood: j.status === 'done' ? 'happy' : 'worried', hold: 2500 });
   });
 });
