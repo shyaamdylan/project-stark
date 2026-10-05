@@ -48,9 +48,19 @@ const RISKY_KEYS = new Set(['⌘Q', '⌥⌘Q', '⌘Backspace', '⌘Delete', '⇧
 // Fields he won't fill in himself.
 const SENSITIVE_FIELD = /pass(word|code|phrase)?\b|\bpin\b|cvv|cvc|security code|card number|credit card|\bssn\b|social security|secret|token|api key|2fa|one[- ]time|\botp\b|verification code|auth(entication)? code|iban|routing number|account number/i;
 
-function riskOf(action) {
+// Return in a field sends or submits what's in it (a message, a comment, a
+// form), except in a search or address bar, where it just searches.
+const RETURN_KEY = /^(?:return|enter|↩|⏎)$/i;
+
+// What would make this action hard to take back, or null. focused: the field
+// the keyboard is in ({ role, label, value }), when known.
+function riskOf(action, focused = null) {
   if (!action) return null;
   if (action.kind === 'shortcut' && RISKY_KEYS.has(action.keys)) return `press ${spokenKeys(action.keys)}`;
+  if (action.kind === 'shortcut' && RETURN_KEY.test(String(action.keys || '').trim()) && focused && /field|text|combo/i.test(focused.role || '') && !isSearchLikeField(focused.role, focused.label)) {
+    const what = String(focused.value || '').trim();
+    return `send ${what ? `"${what.length > 120 ? `${what.slice(0, 119)}…` : what}"` : 'what\'s in'} ${focused.label ? `from "${focused.label}"` : 'that box'}`;
+  }
   if ((action.kind === 'click' || action.kind === 'choose') && action.label && RISKY_LABEL.test(action.label)) return `click "${action.label}"`;
   return null;
 }
@@ -515,7 +525,7 @@ class JarvisRun {
   async checkpoint(a, p, i) {
     const step = this.skill.map.steps[a.stepIndex];
     const reasons = [];
-    const risky = riskOf(a);
+    const risky = riskOf(a, this.latest && this.latest.focused);
     if (risky) reasons.push(risky);
     const stopAndAsk = a.first ? step.guardrails.filter((g) => g.kind === 'stop_and_ask') : [];
     if (!p.confirm && !risky && !stopAndAsk.length) return;
@@ -867,7 +877,8 @@ class JarvisFreestyle extends JarvisRun {
         }
         const spec = parseShortcut(r.text);
         if (!spec) throw new Error(`I don't know the key "${r.text}"`);
-        if (riskOf({ kind: 'shortcut', keys: r.text }) && !(await this.confirm(this.s(`That would press ${spokenKeys(r.text)}. Shall I go ahead{sir}?`)))) {
+        const keyRisk = riskOf({ kind: 'shortcut', keys: r.text }, this.latest && this.latest.focused);
+        if (keyRisk && !(await this.confirm(this.s(/^send /.test(keyRisk) ? `Ready to ${keyRisk}. Send it{sir}?` : `That would press ${spokenKeys(r.text)}. Shall I go ahead{sir}?`)))) {
           this.stop('declined');
           this.check();
         }

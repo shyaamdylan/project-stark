@@ -45,3 +45,11 @@ test('a request to do something is handed back as a task', async () => {
   const r = await answerAboutScreen('k', { question: 'can you explain and then send this', scan: { app: 'Mail', elements: [] }, client: fake({ kind: 'task', say: '', target_id: null }) });
   assert.equal(r.kind, 'task');
 });
+
+test('speech in a language you do not use is dropped as someone else talking', () => {
+  const { judgeSpeech } = require('../src/stt');
+  assert.equal(judgeSpeech({ text: 'show me the nose', language_code: 'eng', language_probability: 0.98 }, ['en']).keep, true);
+  assert.equal(judgeSpeech({ text: 'πάρε ψαλίδι', language_code: 'ell', language_probability: 0.95 }, ['en']).keep, false);
+  assert.equal(judgeSpeech({ text: 'namaste', language_code: 'hin', language_probability: 0.9 }, ['en', 'hi']).keep, true);
+  assert.equal(judgeSpeech({ text: 'ok', language_code: 'nld', language_probability: 0.3 }, ['en']).keep, true); // not sure: keep
+});

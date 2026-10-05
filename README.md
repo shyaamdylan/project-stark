@@ -176,6 +176,22 @@ they're doing (Listening, Thinking, Speaking), and speech drops down underneath.
 flies out from there. Screens without a notch keep the bottom-right corner. `ORB_PLACE=notch`
 puts it at the top centre on every screen. The default, `ORB_PLACE=corner`, keeps the corner.
 
+### Calm by design
+
+- **Resting is still.** While it only listens for its name, the orb doesn't swirl or follow the
+  mouse. Motion means something is happening.
+- **It knows when you're not talking to it.** Speech in a language you don't use with it
+  (`SPEECH_LANGUAGES`) is ignored, and "thanks", "bye" or "well done" ends the conversation
+  instead of being taken as a request. A follow-up without its name works for about 12 seconds.
+- **Nothing is sent without a yes.** Pressing Return in a message or form field counts as
+  sending, so Jarvis shows exactly what will go ("Ready to send "See you at 6" from "Message".
+  Send it?") first. Search and address bars are exempt.
+- **Pointing is a highlight.** A ring around the thing itself glides from one target to the next.
+  `POINTER_STYLE=spark` brings back the cursor that squeezes out of the orb.
+- **Jarvis shows his work.** While he does a task, a small panel by the orb shows the task, the
+  current step, a progress bar and Stop.
+- Cards follow the Mac's light or dark appearance.
+
 ### Awake or dormant
 
 The orb shows whether it's listening to you. **Dormant**: dimmer and calm, only listening for

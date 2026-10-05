@@ -412,3 +412,13 @@ test('a stop before the run starts still counts', async () => {
   assert.deepEqual(calls, []);
   assert.deepEqual(asked, []);
 });
+
+test('Return in a message or form field counts as sending it; in a search box it does not', () => {
+  const { riskOf } = require('../src/jarvis');
+  const compose = { role: 'AXTextArea', label: 'Message', value: 'See you at 6' };
+  assert.match(riskOf({ kind: 'shortcut', keys: 'Return' }, compose), /send "See you at 6" from "Message"/);
+  assert.match(riskOf({ kind: 'shortcut', keys: 'Enter' }, { role: 'AXTextField', label: 'Comment', value: '' }), /send what's in from "Comment"/);
+  assert.equal(riskOf({ kind: 'shortcut', keys: 'Return' }, { role: 'AXSearchField', label: 'Search', value: 'cats' }), null);
+  assert.equal(riskOf({ kind: 'shortcut', keys: 'Return' }, { role: 'AXTextField', label: 'smart search field', value: 'example.com' }), null);
+  assert.equal(riskOf({ kind: 'shortcut', keys: 'Return' }, null), null);
+});

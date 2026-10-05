@@ -70,6 +70,18 @@
         <button id="rec-finish" type="button">Finish</button>
       </div>
 
+      <!-- While Jarvis works: what he's doing, how far along, and Stop. -->
+      <div id="activity" class="hit hidden" role="status" aria-live="polite">
+        <div class="act-head">
+          <span class="act-dot"></span>
+          <span id="act-title"></span>
+          <span id="act-count"></span>
+          <button id="act-stop" type="button" title="Stop">Stop</button>
+        </div>
+        <div id="act-step"></div>
+        <div class="act-bar"><div id="act-fill"></div></div>
+      </div>
+
       <!-- Who you're talking to, shown for a moment when it changes -->
       <div id="agent-tag" class="hidden"></div>
 

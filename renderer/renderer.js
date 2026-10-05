@@ -55,6 +55,7 @@ const state = {
   convoUntil: 0, // after an exchange, keep listening (no wake word) until this time
   canHear: false, // speech-to-text available (needs ElevenLabs)
   pointerAt: null, // where the cursor is pointing, while it's out of the orb
+  pointerStyle: 'highlight', // 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
   voice: 'system',
@@ -87,7 +88,8 @@ function frame(t) {
   const dx = state.cursor.x - c.x;
   const dy = state.cursor.y - c.y;
   const d = Math.hypot(dx, dy) || 1;
-  const reach = Math.min(14, d / 40);
+  // Resting, it stays still: motion is kept for when something is happening.
+  const reach = awake() ? Math.min(14, d / 40) : 0;
   glintEl.style.transform = `translate(${(dx / d) * reach}px, ${(dy / d) * reach}px)`;
 
   let target = 0;
@@ -337,6 +339,15 @@ async function pointTo(rect, label, taps = 3) {
   clearTimeout(homeTimer);
   if (homing) await homing; // already on its way back: let it land, then go out again
   const center = { x: rect.x + rect.w / 2, y: Math.max(4, rect.y + rect.h / 2) };
+  // Highlight style: a calm ring around the thing itself, gliding from one
+  // target to the next. No cursor, so it's never mistaken for your mouse.
+  if (state.pointerStyle === 'highlight') {
+    if (!state.pointerAt) flare();
+    spot.classList.remove('fading');
+    showSpot(rect, label);
+    state.pointerAt = center;
+    return;
+  }
   if (state.pointerAt) {
     spot.classList.add('hidden');
     await cursorToSpark(state.pointerAt);
@@ -357,6 +368,13 @@ async function goHome() {
   if (!state.pointerAt) return;
   const from = state.pointerAt;
   state.pointerAt = null;
+  if (state.pointerStyle === 'highlight') {
+    spot.classList.add('fading');
+    await sleep(300);
+    if (!state.pointerAt) clearPointing();
+    spot.classList.remove('fading');
+    return;
+  }
   homing = (async () => {
     spot.classList.add('hidden');
     await cursorToSpark(from);
@@ -419,7 +437,8 @@ function stopSpeaking() {
 }
 
 // Show text in the bubble and speak it. Resolves when finished talking.
-async function say(text, { mood, hold = 0, speak = true } = {}) {
+// show: false speaks it without the bubble (the task panel shows it instead).
+async function say(text, { mood, hold = 0, speak = true, show = true } = {}) {
   clearTimeout(state.sayTimer);
   stopSpeaking();
   const id = state.speechId;
@@ -427,8 +446,10 @@ async function say(text, { mood, hold = 0, speak = true } = {}) {
     state.lastSpoken = text;
     state.lastSpokenAt = Date.now();
   }
-  sayEl.textContent = text;
-  showBubble();
+  if (show) {
+    sayEl.textContent = text;
+    showBubble();
+  }
   buddyEl.classList.remove('happy', 'worried');
   if (mood) buddyEl.classList.add(mood);
 
@@ -438,6 +459,7 @@ async function say(text, { mood, hold = 0, speak = true } = {}) {
   const elapsed = Date.now() - started;
   if (id !== state.speechId) return;
 
+  if (!show) return;
   state.sayTimer = setTimeout(() => {
     if (id !== state.speechId) return;
     buddyEl.classList.remove('worried');
@@ -813,16 +835,51 @@ function stopJarvis() {
   if (!state.executing) return;
   window.buddy.jarvisStop();
   stopSpeaking();
-  guideCount.textContent = 'Stopping…';
+  actStep.textContent = 'Stopping…';
 }
+
+// ---------- the task panel (like a Live Activity) ----------
+//
+// While Jarvis works, a small panel by the orb says what he's doing, how far
+// along he is, and has a Stop button. His spoken lines go there instead of the
+// speech bubble, which is kept for his questions.
+const activity = $('activity');
+const actTitle = $('act-title');
+const actStep = $('act-step');
+const actCount = $('act-count');
+const actFill = $('act-fill');
+
+function showActivity(title) {
+  actTitle.textContent = title || 'Working on it';
+  actStep.textContent = 'Getting ready…';
+  actCount.textContent = '';
+  actFill.style.width = '0%';
+  activity.classList.remove('done', 'hidden');
+}
+
+function updateActivity({ say: line, stepNo, totalSteps }) {
+  if (line) actStep.textContent = line;
+  if (stepNo) {
+    actCount.textContent = totalSteps ? `${stepNo} of ${totalSteps}` : `Step ${stepNo}`;
+    actFill.style.width = totalSteps ? `${Math.min(100, (stepNo / totalSteps) * 100)}%` : '';
+    activity.classList.toggle('open-ended', !totalSteps);
+  }
+}
+
+function endActivity(status, line) {
+  if (activity.classList.contains('hidden')) return;
+  activity.classList.add('done');
+  actStep.textContent = line || (status === 'done' ? 'Done' : 'Stopped');
+  if (status === 'done') actFill.style.width = '100%';
+  setTimeout(() => activity.classList.add('hidden'), 3500);
+}
+
+$('act-stop').addEventListener('click', () => stopJarvis());
 
 window.buddy.on('jarvis-step', (step) =>
   queueGuide(async () => {
-    if (step.stepNo) {
-      guideCount.textContent = step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`;
-      guideBar.classList.remove('hidden');
-    }
-    if (step.say) say(step.say, { mood: 'happy', hold: 60000, speak: !step.quiet });
+    updateActivity(step);
+    if (step.say) say(step.say, { mood: 'happy', hold: 60000, speak: !step.quiet, show: false });
     if (step.rect) await pointTo(step.rect, step.label, Infinity);
   })
 );
@@ -833,8 +890,7 @@ window.buddy.on('jarvis-state', (j) => {
     const next = afterStop;
     afterStop = null;
     state.executing = false;
-    nextBtn.classList.remove('hidden');
-    guideBar.classList.add('hidden');
+    activity.classList.add('hidden');
     queueGuide(goHome);
     setTimeout(() => handleAsk(next), 50);
     return;
@@ -843,23 +899,20 @@ window.buddy.on('jarvis-state', (j) => {
     // Jarvis asks his questions, then works; steps arrive on 'jarvis-step'.
     if (state.guiding) stopGuide();
     state.executing = true;
-    guideCount.textContent = 'Preparing…';
-    nextBtn.classList.add('hidden');
-    guideBar.classList.remove('hidden');
-    showBubble();
+    showActivity(j.title);
+    hideBubbleIfIdle();
     setTimeout(updateMic, 0);
     return;
   }
   state.executing = false;
-  nextBtn.classList.remove('hidden');
-  guideBar.classList.add('hidden');
   guideNote.classList.add('hidden');
   buddyEl.classList.remove('thinking');
+  endActivity(j.status, j.say);
   openConvo();
   queueGuide(async () => {
     if (j.status === 'done') flare();
     goHomeLater();
-    if (j.say) await say(j.say, { mood: j.status === 'done' ? 'happy' : 'worried', hold: 2500 });
+    if (j.say) await say(j.say, { mood: j.status === 'done' ? 'happy' : 'worried', hold: 2500, show: false });
   });
 });
 
@@ -1064,7 +1117,18 @@ const hasWords = (t) => t.replace(/[^a-z0-9]/gi, '').length >= 2;
 // any other exchange, it stays open for a little while for a follow-up, then
 // goes back to dormant (listening only for its name).
 
-const CONVO_MS = 20000;
+const CONVO_MS = 12000;
+
+// "Thanks", "bye", "that's all", "well done": the conversation is over, not a
+// new request. The whole utterance has to be one of these, give or take filler.
+const CLOSING = /^(?:(?:ok(?:ay)?|cool|great|nice|perfect|awesome|alright|right|yeah|yep|yes|no|um+|uh+|oh|wow|amazing|brilliant|lovely)[\s,.!]*)*(?:thanks?(?: you)?|thank you|cheers|ta|bye(?: bye)?|goodbye|see you|that'?s (?:all|it|everything|great|perfect|so cool|amazing)|never ?mind|nothing|no thanks?|well done|good job|nice one|good work|you'?re (?:the best|amazing|a star))(?:[\s,.!]+(?:bro|mate|man|dude|friday|jarvis|sir|buddy|so much|very much|again|bye|then|for that|for (?:your|the) help|a lot|though|now))*[\s,.!]*$/i;
+const isClosing = (t) => CLOSING.test(String(t || '').trim());
+
+function closeConvo() {
+  state.convoUntil = 0;
+  clearTimeout(convoTimer);
+  setTimeout(updateMic, 0);
+}
 let convoTimer = null;
 const convoOpen = () => Date.now() < state.convoUntil;
 
@@ -1147,6 +1211,12 @@ async function heard(wav, clip = {}) {
   // straight after an exchange (a follow-up needs no wake word).
   if ((state.wakeEnabled && woke) || (convoOpen() && hasWords(text))) {
     const rest = text;
+    if (isClosing(rest)) {
+      // Said to it ("Hey Friday, thanks"): a word back. Otherwise just rest.
+      if (woke) say(state.agent === 'jarvis' ? 'At your service.' : 'Anytime!', { mood: 'happy', hold: 2500 });
+      closeConvo();
+      return;
+    }
     if (state.busy) return;
     if (named) switchAgent(named);
     if (hasWords(rest)) {
@@ -1367,6 +1437,7 @@ window.buddy.on('config', (c) => {
   state.micOff = Boolean(c.micOff);
   state.canHear = Boolean(c.canHear);
   state.voice = c.voice;
+  state.pointerStyle = c.pointerStyle === 'spark' ? 'spark' : 'highlight';
   state.agents = c.agents || {};
   applyAgent(c.agent || 'friday', { show: false });
   setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });

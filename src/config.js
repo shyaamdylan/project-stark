@@ -54,6 +54,12 @@ function loadConfig(userDataDir) {
     voiceEnabled: get('VOICE_ENABLED', '1') !== '0',
     // Say this to wake the buddy ("Hey Friday, how do I…"). Needs ELEVENLABS_API_KEY.
     wakeWord: get('WAKE_WORD', 'friday'),
+    // Languages you talk to it in (en, hi, ta…). Speech in others is someone
+    // else in the room, and is ignored.
+    speechLanguages: String(get('SPEECH_LANGUAGES', 'en')).split(/[\s,]+/).filter(Boolean),
+    // How it points: "highlight" (a ring around the thing) or "spark" (a cursor
+    // flies out of the orb to it).
+    pointerStyle: /^spark$/i.test(get('POINTER_STYLE', 'highlight')) ? 'spark' : 'highlight',
     wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
     // Take a screenshot of the front window when accessibility isn't enough
     // (diagrams, pictures, apps that describe nothing). Needs Screen Recording.

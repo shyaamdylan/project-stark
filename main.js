@@ -142,6 +142,7 @@ function createWindow() {
       agent,
       // Speech-to-text needs ElevenLabs; without it, conversations are typed.
       canHear: Boolean(cfg.elevenLabs.apiKey),
+      pointerStyle: cfg.pointerStyle,
     });
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
       win.webContents.send('say', {
