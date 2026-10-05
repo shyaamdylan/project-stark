@@ -235,3 +235,33 @@ test('Jarvis: a project that is already running is not started again, unless ask
     process.env.HOME = oldHome;
   }
 });
+
+test('Jarvis: no answer is not a no; he can decide himself, and stops after two', async () => {
+  const brain = scripted([
+    { status: 'need_info', say: 'Which song?' },
+    { status: 'step', kind: 'open_url', text: 'example.com/song', say: 'Picking one.' },
+    { status: 'need_info', say: 'Which key?' },
+    { status: 'need_info', say: 'Which key, then?' },
+  ]);
+  const run = new JarvisFreestyle({
+    goal: 'learn a nice song',
+    improviser: brain,
+    scan: async () => ({ app: 'Safari', elements: [] }),
+    act: { openUrl: async () => {} },
+    ask: async () => '',
+    wait: () => Promise.resolve(),
+  });
+  const res = await run.run();
+  assert.match(brain.notes[1], /didn't answer\. If it's a choice you can sensibly make yourself, make it/);
+  assert.equal(res.status, 'stopped'); // the second unanswered question in a row ends it
+  assert.equal(brain.notes.length, 4);
+});
+
+test('Jarvis: a possibly related learned skill is given as reference', async () => {
+  const brain = scripted([{ status: 'done', say: 'Done.' }]);
+  const related = { map: { title: 'Make a widget', summary: 'How we make widgets.', steps: [{ title: 'Open the maker', action: 'Click New widget', rule: 'Always blue', guardrails: [] }] } };
+  const run = new JarvisFreestyle({ goal: 'make a new widget', related, improviser: brain, scan: async () => ({ elements: [] }), act: {}, ask: async () => '', wait: () => Promise.resolve() });
+  await run.run();
+  assert.match(brain.notes[0], /An expert taught you a task that may be this one/);
+  assert.match(brain.notes[0], /1\. Open the maker: Click New widget \(Rule: Always blue\)/);
+});

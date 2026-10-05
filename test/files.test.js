@@ -136,3 +136,16 @@ test('with Spotlight off, the folders are walked: words can name the file or its
   // Only plain name queries are walked; content or date queries aren't guessed at.
   assert.deepEqual(await walkFind(['-onlyin', home, 'kMDItemFSContentChangeDate >= $time.today(-2)']), []);
 });
+
+test('a name said as two words, or an extra word, still finds the file', async () => {
+  const { walkFind } = require('../src/files');
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vary-')));
+  for (const d of ['Documents/moonbeam/docs', 'Documents/lunar']) fs.mkdirSync(path.join(home, d), { recursive: true });
+  fs.writeFileSync(path.join(home, 'Documents/moonbeam/README.md'), '');
+  fs.writeFileSync(path.join(home, 'Documents/lunar/notes.txt'), '');
+  const run = async (args, limit) => walkFind(args, limit);
+  const rel = async (q) => (await findFiles(q, { home, run })).map((f) => path.relative(home, f.path))[0];
+  assert.equal(await rel('the moon beam project readme'), path.join('Documents', 'moonbeam', 'README.md'));
+  // The distinctive word is kept: "lunar notes" is the notes in lunar, not any notes.
+  assert.equal(await rel('lunar todo notes'), path.join('Documents', 'lunar', 'notes.txt'));
+});

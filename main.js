@@ -830,6 +830,7 @@ async function askJarvis(raw) {
 
   // The skill lookup (Claude) and the screen scan don't depend on each other: do both at once.
   const looking = scanForAsk();
+  let relatedSkill = null;
   if (Guide.available(cfg)) {
     let found = null;
     try {
@@ -837,9 +838,10 @@ async function askJarvis(raw) {
     } catch (err) {
       console.error('[jarvis] skill lookup', err.message);
     }
-    // Only a clear match runs a learned skill. A "maybe" isn't worth a
-    // question: he has a go at what was actually asked instead.
+    // A clear match runs the learned skill. A "maybe" isn't worth a question:
+    // he does what was actually asked, with that skill as an expert's reference.
     if (found && found.id && found.match !== 'maybe') return beginJarvis(found.id);
+    if (found && found.id && found.match === 'maybe') relatedSkill = loadSkill(found.id);
   }
 
   const { scan, reply } = await looking;
@@ -862,14 +864,16 @@ async function askJarvis(raw) {
   }
 
   // Not taught: he has a go, and says honestly if he can't do it properly.
-  if (Guide.available(cfg)) return beginFreestyle(text);
+  if (Guide.available(cfg)) return beginFreestyle(text, relatedSkill);
   return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}. Friday can learn it from someone who knows how.") };
 }
 
-function beginFreestyle(goal) {
+function beginFreestyle(goal, related = null) {
   const p = persona('jarvis', cfg);
+  if (related) console.log(`[jarvis] with "${related.map.title}" as reference`);
   const run = new JarvisFreestyle({
     goal,
+    related,
     improviser: new Improviser(cfg.anthropicApiKey, { mode: 'do', address: cfg.jarvis.address }),
     s: p.s,
     scan: scanFrontWindow,

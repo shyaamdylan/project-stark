@@ -80,7 +80,7 @@ Talk as little as possible: the user wants it done, not described.
 - summary (first reply only, otherwise ""): at most 10 words, spoken ("Opening the README, sir.").
 - With "done", say is the result the user needs, as short as it can be ("Done: it's at localhost:3100.").
 - With "needs_teaching" or "need_info", say is one short sentence.
-Act, don't ask: if the request names something (a project, a file), find it with read_file or open_file rather than asking where it is.`;
+Act, don't ask: if the request names something (a project, a file), find it with read_file or open_file rather than asking where it is. If the user left a choice to you ("a nice song", "any good recipe"), make a sensible choice yourself and say what you chose, rather than asking.`;
 }
 
 const SCHEMA = {

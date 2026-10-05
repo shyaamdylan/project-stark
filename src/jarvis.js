@@ -699,6 +699,16 @@ class JarvisRun {
   }
 }
 
+// A learned skill, briefly, as reference for a best-effort run.
+function relatedText(skill) {
+  const { map } = skill;
+  const steps = (map.steps || []).map((s, i) => {
+    const extra = [s.rule && `Rule: ${s.rule}`, ...(s.guardrails || []).map((g) => `Guardrail: ${g.text}`)].filter(Boolean).join(' ');
+    return `${i + 1}. ${s.title}: ${s.action}${extra ? ` (${extra})` : ''}`;
+  });
+  return `"${map.title}": ${map.summary || ''}\n${steps.join('\n')}`.slice(0, 4000);
+}
+
 // ---------- having a go at something he wasn't taught ----------
 //
 // The same hands and the same safety rules as a learned skill, but each next
@@ -718,16 +728,21 @@ class JarvisFreestyle extends JarvisRun {
   // deps as JarvisRun, minus skill/actions/plan, plus:
   //   goal        what the user asked for
   //   improviser  an Improviser in 'do' mode (or a fake in tests)
-  constructor({ goal, improviser, ...deps }) {
+  //   related     optional: a learned skill that may be this task (a "maybe"
+  //               match), given to Claude as an expert's reference
+  constructor({ goal, improviser, related = null, ...deps }) {
     super({ skill: { map: { title: goal, steps: [] }, session: { events: [] } }, actions: [], plan: { can_run: true, inputs: [], actions: [], step_lines: [] }, ...deps });
     this.goal = goal;
     this.brain = improviser;
     this.ranAnyway = new Set(); // commands to run even though the project is already up
+    this.related = related;
   }
 
   async runInner() {
     let note = `The user asked: "${this.goal}"`;
+    if (this.related) note += `\n\nAn expert taught you a task that may be this one, or close to it. Where it fits, follow its steps and rules rather than improvising:\n${relatedText(this.related)}`;
     let failures = 0;
+    let unanswered = 0;
     for (let step = 0; ; step++) {
       this.check();
       const s = await this.scan();
@@ -746,11 +761,15 @@ class JarvisFreestyle extends JarvisRun {
       }
       if (r.status === 'need_info') {
         const answer = await this.ask(r.say, 'jarvis-input');
-        if (!answer) {
+        // No answer isn't a no: he may be able to decide himself. Twice in a row, he stops.
+        if (!answer && ++unanswered >= 2) {
           this.stop('declined');
           this.check();
         }
-        note = `The user answered: "${answer}"`;
+        if (answer) unanswered = 0;
+        note = answer
+          ? `The user answered: "${answer}"`
+          : "The user didn't answer. If it's a choice you can sensibly make yourself, make it and carry on (say what you chose). Otherwise finish with status done, saying in one sentence what you need.";
         continue;
       }
 
@@ -768,6 +787,7 @@ class JarvisFreestyle extends JarvisRun {
       try {
         note = await this.doStep(r);
         failures = 0;
+        unanswered = 0;
       } catch (err) {
         if (err instanceof Stopped || err.code) throw err;
         failures++;

@@ -259,16 +259,13 @@ async function searchInFolders(words, search, home) {
 // clauses are understood: every word must be in the name. Hidden folders,
 // ~/Library and build folders are skipped, and the walk is bounded.
 const WALK_SKIP = new Set(['node_modules', 'Library', 'Applications', 'Pictures', 'Music', 'Movies', 'venv', '__pycache__', 'dist', 'build', 'target', 'site-packages']);
-function walkFind(args, limit = 400, { maxDepth = 5, maxEntries = 60000 } = {}) {
-  const at = args.indexOf('-onlyin');
-  const root = at >= 0 ? args[at + 1] : os.homedir();
-  const query = args[args.length - 1];
-  const words = [...String(query).matchAll(/kMDItemDisplayName == "\*([^"*]*)\*"cd/g)].map((m) => squash(m[1])).filter(Boolean);
-  if (!words.length || /kMDItem(?!DisplayName)/.test(query)) return Promise.resolve([]);
-  const out = [];
-  let seen = 0;
+const walkCache = new Map(); // root -> { at, paths }: one walk serves many searches
+function walkList(root, { maxDepth = 5, maxEntries = 60000 } = {}) {
+  const hit = walkCache.get(root);
+  if (hit && Date.now() - hit.at < 60000) return hit.paths;
+  const paths = [];
   const queue = [[root, 0]];
-  while (queue.length && out.length < limit && seen < maxEntries) {
+  while (queue.length && paths.length < maxEntries) {
     const [dir, depth] = queue.shift();
     let entries;
     try {
@@ -277,22 +274,64 @@ function walkFind(args, limit = 400, { maxDepth = 5, maxEntries = 60000 } = {}) 
       continue;
     }
     for (const d of entries) {
-      seen++;
       if (d.name.startsWith('.')) continue;
       const p = path.join(dir, d.name);
-      const name = squash(d.name);
-      if (words.every((w) => name.includes(w))) out.push(p);
+      paths.push(p);
       if (d.isDirectory() && depth < maxDepth && !WALK_SKIP.has(d.name) && !/\.(app|bundle|framework|photoslibrary)$/i.test(d.name)) queue.push([p, depth + 1]);
     }
+  }
+  walkCache.set(root, { at: Date.now(), paths });
+  return paths;
+}
+function walkFind(args, limit = 400) {
+  const at = args.indexOf('-onlyin');
+  const root = at >= 0 ? args[at + 1] : os.homedir();
+  const query = args[args.length - 1];
+  const words = [...String(query).matchAll(/kMDItemDisplayName == "\*([^"*]*)\*"cd/g)].map((m) => squash(m[1])).filter(Boolean);
+  if (!words.length || /kMDItem(?!DisplayName)/.test(query)) return Promise.resolve([]);
+  const out = [];
+  for (const p of walkList(root)) {
+    const name = squash(path.basename(p));
+    if (words.every((w) => name.includes(w))) out.push(p);
+    if (out.length >= limit) break;
   }
   return Promise.resolve(out);
 }
 
 // Spotlight first; if it knows nothing at all under that folder, walk it.
+// Whether Spotlight has anything indexed under a folder, checked once and remembered.
+const indexed = new Map(); // root -> { at, yes }
+async function spotlightIndexes(root) {
+  const hit = indexed.get(root);
+  if (hit && Date.now() - hit.at < 10 * 60000) return hit.yes;
+  const yes = (await mdfind(['-onlyin', root, 'kMDItemDisplayName == "*"'], 1, 3000)).length > 0;
+  indexed.set(root, { at: Date.now(), yes });
+  return yes;
+}
 async function mdfindOrWalk(args, limit) {
-  const found = await mdfind(args, limit);
-  if (found.length) return found;
+  const at = args.indexOf('-onlyin');
+  const root = at >= 0 ? args[at + 1] : os.homedir();
+  if (await spotlightIndexes(root)) {
+    const found = await mdfind(args, limit);
+    if (found.length) return found;
+  }
   return walkFind(args, limit);
+}
+
+// Other ways the words might have been meant, fewest changes first: two
+// neighbouring words joined ("piano scribe" -> "pianoscribe"), one word left
+// out, or both. Never fewer than one word.
+function wordVariants(words) {
+  if (words.length > 7) return [];
+  const joins = [{ words, changes: 0 }];
+  for (let i = 0; i + 1 < words.length; i++) joins.push({ words: [...words.slice(0, i), words[i] + words[i + 1], ...words.slice(i + 2)], changes: 1 });
+  const out = [];
+  for (const j of joins) {
+    if (j.changes) out.push(j);
+    if (j.words.length >= 2) for (let i = 0; i < j.words.length; i++) out.push({ words: j.words.filter((_, k) => k !== i), changes: j.changes + 1 });
+  }
+  const seen = new Set();
+  return out.sort((a, b) => a.changes - b.changes).filter((v) => !seen.has(v.words.join(' ')) && seen.add(v.words.join(' ')));
 }
 
 // Up to `limit` candidates, best first: { path, name, kind, blocked, score }.
@@ -330,6 +369,26 @@ async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null
     results = await search(nameQuery(q.words, q.sinceDays), q.words);
     // "The README for PianoScribe": some words name the folder it's in, not the file.
     if (!results.length && q.words.length >= 2) results = await searchInFolders(q.words, search, home);
+    // Speech and loose wording: "the piano scribe project readme" has a word
+    // that's in no name ("project") and a name said as two words. Try joining
+    // neighbouring words and leaving one word out, fewest changes first.
+    // Within a level, the candidates whose whole path (folders too) covers more
+    // of what was said win, so the distinctive word isn't the one dropped.
+    if (!results.length && q.words.length >= 2) {
+      const said = q.words.map(squash);
+      const variants = wordVariants(q.words);
+      for (const level of [...new Set(variants.map((v) => v.changes))]) {
+        const batches = await Promise.all(variants.filter((v) => v.changes === level).map(async (alt) => (await search(nameQuery(alt.words, q.sinceDays), alt.words)).concat(alt.words.length >= 2 ? await searchInFolders(alt.words, search, home) : [])));
+        for (const got of batches) {
+          for (const c of got) {
+            const where = squash(within(c.path, home) ? path.relative(home, c.path) : c.path);
+            c.score += 0.3 * (said.filter((w) => where.includes(w)).length / said.length) - 0.3 - 0.04 * level;
+            results.push(c);
+          }
+        }
+        if (results.length) break;
+      }
+    }
     // Nothing by name: let Spotlight match names and contents its own way.
     if (!results.length) {
       const plain = (await Promise.all(roots.map((r) => run(['-onlyin', r, q.words.join(' ')], 200)))).flat();
@@ -428,4 +487,4 @@ async function resolveFile(query, { home = os.homedir(), run } = {}) {
   return best && !best.blocked ? best.path : null;
 }
 
-module.exports = { readTextFile, resolveFile, findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, walkFind, setPicksFile, rememberPick, makeRephrase };
+module.exports = { readTextFile, resolveFile, findFiles, isClear, openVerdict, parseQuery, score, nameQuery, typeQuery, BLOCKED_EXT, appRoots, walkFind, wordVariants, setPicksFile, rememberPick, makeRephrase };
