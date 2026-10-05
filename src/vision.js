@@ -77,7 +77,7 @@ You're looking at a screenshot of the front window on their Mac, because what th
 }
 
 // image: { data (base64 JPEG), width, height } of the front window only.
-async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', address = '', client = null }) {
+async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', address = '', history = '', client = null }) {
   const c = client || new Anthropic({ apiKey });
   const voice = agent === 'jarvis' ? VOICES.jarvis(address) : VOICES.friday;
   const response = await c.beta.messages.create({
@@ -92,7 +92,7 @@ async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', a
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image.data } },
-          { type: 'text', text: `They asked: "${question}"\n\nThe screenshot is ${image.width}×${image.height} pixels. What's in front of them: ${screenContext(scan)}` },
+          { type: 'text', text: `${history ? `Recent conversation (read the question in light of it; "now the left hand" carries on from what came before):\n${history}\n\n` : ''}They asked: "${question}"\n\nThe screenshot is ${image.width}×${image.height} pixels. What's in front of them: ${screenContext(scan)}` },
         ],
       },
     ],

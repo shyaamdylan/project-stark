@@ -91,3 +91,15 @@ test('sharing one word is not enough to be suggested', () => {
   ];
   assert.deepEqual(findBest('rocket launch', items).suggestions, []);
 });
+
+test('"where does it say X" and "could you now show me X" look for X', () => {
+  const { findBest } = require('../src/matcher');
+  const items = [
+    { role: 'AXStaticText', label: 'Recents', x: 0, y: 0, w: 60, h: 20 },
+    { role: 'AXStaticText', label: 'Shared', x: 0, y: 30, w: 60, h: 20 },
+    { role: 'AXButton', label: 'Export', x: 0, y: 60, w: 60, h: 20 },
+  ];
+  assert.equal(findBest('where does it say recent', items).match.label, 'Recents');
+  assert.equal(findBest('Where does it say shared', items).match.label, 'Shared');
+  assert.equal(findBest('could you now show me the export button', items).match.label, 'Export');
+});

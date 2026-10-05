@@ -53,7 +53,7 @@ const VOICES = {
   jarvis: (address) => `You are J.A.R.V.I.S., the calm, capable AI butler from Iron Man: polite, concise, with a dry British wit.${address ? ` You address the user as "${address}" now and then.` : ''}`,
 };
 
-async function answerAboutScreen(apiKey, { question, scan, agent = 'friday', address = '', client = null }) {
+async function answerAboutScreen(apiKey, { question, scan, agent = 'friday', address = '', history = '', client = null }) {
   const c = client || new Anthropic({ apiKey });
   const screen = describeScreen((scan && scan.elements) || []);
   const voice = agent === 'jarvis' ? VOICES.jarvis(address) : VOICES.friday;
@@ -64,7 +64,7 @@ async function answerAboutScreen(apiKey, { question, scan, agent = 'friday', add
     fallbacks: 'default',
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     system: system(voice),
-    messages: [{ role: 'user', content: `They asked: "${question}"\n\nWhat's in front of them: ${screenContext(scan)}\n\nOn screen:\n${screen.text || '(nothing readable)'}` }],
+    messages: [{ role: 'user', content: `${history ? `Recent conversation (read the question in light of it):\n${history}\n\n` : ''}They asked: "${question}"\n\nWhat's in front of them: ${screenContext(scan)}\n\nOn screen:\n${screen.text || '(nothing readable)'}` }],
   });
   if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', target: null, needsPicture: false };
   try {

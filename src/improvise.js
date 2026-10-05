@@ -192,8 +192,8 @@ class Improviser {
 //   ask(text)       a question for the user -> their answer ('' if skipped)
 //   thinking()      show that she's working out the next step
 class ImprovisedWalkthrough {
-  constructor({ goal, brain, scan, fingerprint, emit, ask, thinking = () => {}, pollMs = 500, idleMs = 1200, giveUpMs = 180000 }) {
-    Object.assign(this, { goal, brain, scanFn: scan, fingerprint, emit, ask, thinking, pollMs, idleMs, giveUpMs });
+  constructor({ goal, history = '', brain, scan, fingerprint, emit, ask, thinking = () => {}, pollMs = 500, idleMs = 1200, giveUpMs = 180000 }) {
+    Object.assign(this, { goal, history, brain, scanFn: scan, fingerprint, emit, ask, thinking, pollMs, idleMs, giveUpMs });
     this.running = false;
     this.inputAt = 0;
     this.skipped = false;
@@ -219,7 +219,7 @@ class ImprovisedWalkthrough {
 
   async start() {
     this.running = true;
-    let note = `The user asked: "${this.goal}"`;
+    let note = `${this.history ? `Recent conversation (for context):\n${this.history}\n\n` : ''}The user asked: "${this.goal}"`;
     try {
       while (this.running) {
         this.thinking();

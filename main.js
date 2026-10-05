@@ -24,6 +24,30 @@ const { correctNames, knownNames } = require('./src/names');
 const sessionLog = require('./src/sessionlog');
 const { answerAboutScreen, isScreenQuestion } = require('./src/screenqa');
 const { needsVision, lookAtScreen, boxToScreen } = require('./src/vision');
+const { Conversation } = require('./src/convo');
+
+// The last few exchanges, so a follow-up is understood in light of what came
+// before. `turnHistory` is that history as of the request being handled now
+// (without the request itself), for the Claude calls it makes.
+const convo = new Conversation();
+let turnHistory = '';
+let lastScreenKey = ''; // app|window of the last scan a request used
+
+// What a reply did, for the conversation memory.
+function replyMode(res) {
+  if (!res) return { mode: 'none' };
+  if (res.looked) return { mode: 'look', target: res.label || '' };
+  if (res.guide) return { mode: 'lesson' };
+  if (res.jarvis) return { mode: 'task' };
+  if (res.clarify) return { mode: 'none' };
+  if (res.rect) return { mode: 'point', target: res.label || '' };
+  if (res.ok && res.sayOnly) return { mode: 'answer' };
+  return { mode: 'none' };
+}
+
+function remember(userText, res) {
+  convo.add(agent, res && (res.clarify ? res.question : res.say), { ...replyMode(res), window: lastScreenKey });
+}
 const { screenContext } = require('./src/observe');
 const act = require('./src/act');
 const textMode = require('./src/textmode');
@@ -233,7 +257,10 @@ const stripWake = (text) => splitWake(text).rest;
 
 ipcMain.handle('ask', async (_e, rawText, who) => {
   sessionLog.convo('You', rawText);
+  turnHistory = convo.forPrompt();
+  convo.add('user', splitWake(rawText).rest);
   const res = await handleAsk(rawText, who);
+  remember(rawText, res);
   sessionLog.convoFromReply(res, agent);
   return res;
 });
@@ -271,6 +298,7 @@ async function scanForAsk() {
     return { reply: { ok: false, reason: 'error', say: "I couldn't look just now." } };
   }
   if (scan.error) return { reply: { ok: false, reason: scan.error, say: "I can't see an app window." } };
+  lastScreenKey = `${scan.app}|${scan.window || ''}`;
   return { scan };
 }
 
@@ -280,6 +308,18 @@ async function ask(text) {
 
   stopGuide();
   const canGuide = Guide.available(cfg);
+  // Carrying on with what she just did here ("now the left hand" after pointing
+  // at the nose in a diagram): do the same kind of thing, before anything else.
+  const follow = canGuide ? convo.followUp(text, lastScreenKey) : null;
+  if (follow) console.log(`[ask] follow-up to the last ${follow}`);
+  if (follow === 'look') {
+    const res = await visualAnswer(text, scan, 'friday', 'a follow-up to what was just looked at');
+    if (res) return res;
+  }
+  if (follow === 'answer') {
+    const res = await screenAnswer(text, scan, 'friday');
+    if (res) return res;
+  }
   // A picture, a diagram, an app that describes nothing: look before answering.
   if (canGuide && !looksLikeTask(text)) {
     const res = await lookIfNeeded(text, scan, 'friday');
@@ -290,7 +330,7 @@ async function ask(text) {
     const res = await screenAnswer(text, scan, 'friday');
     if (res) return res;
   }
-  if (canGuide && looksLikeTask(text)) {
+  if (canGuide && looksLikeTask(text) && !follow) {
     const res = await startGuide(text, scan, null, scan);
     if (res.reason !== 'not-learned') return res;
     // Not a learned skill: it may still be one obvious button on screen...
@@ -347,7 +387,7 @@ let replay = null;
 async function screenAnswer(text, scan, who) {
   let r;
   try {
-    r = await answerAboutScreen(cfg.anthropicApiKey, { question: text, scan, agent: who, address: cfg.jarvis.address });
+    r = await answerAboutScreen(cfg.anthropicApiKey, { question: text, scan, agent: who, address: cfg.jarvis.address, history: turnHistory });
   } catch (err) {
     console.error('[screen question]', err.message);
     return null;
@@ -432,7 +472,7 @@ async function visualAnswer(text, scan, who, why) {
   console.log(`[vision] looking at ${scan.app}${scan.window ? ` — "${scan.window}"` : ''} (${image.width}×${image.height}) because ${why}`);
   let r;
   try {
-    r = await lookAtScreen(cfg.anthropicApiKey, { question: text, image, scan, agent: who, address: cfg.jarvis.address });
+    r = await lookAtScreen(cfg.anthropicApiKey, { question: text, image, scan, agent: who, address: cfg.jarvis.address, history: turnHistory });
   } catch (err) {
     console.error('[vision]', err.message);
     return null;
@@ -455,8 +495,12 @@ async function lookIfNeeded(text, scan, who, { missed = false } = {}) {
 // Worth a look when accessibility found nothing: questions and "where/show me" requests, not chit-chat.
 const LOOKABLE = /(where|which|what|point|show|find|see|look|this|that|these|those)/i;
 
+// "Can you show me X", "point to X", "where's X": pointing, not a task to walk through.
+const SHOW_ME = /^(?:(?:can|could|would) you\s+)?(?:now\s+|please\s+|just\s+|also\s+)*(?:show me|point (?:to|at|out)|highlight|where(?:'s| is| are)?)\b(?!\s+how\b)/i;
+
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
+  if (SHOW_ME.test(t)) return false;
   return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i|open|go to|search|look up|create|make|change|turn (on|off)|set ?up|add|install|get to|sign (in|up)|log in|download|upload|share|send|save|export|print)\b/.test(t);
 }
 
@@ -632,7 +676,7 @@ async function startGuide(text, scan, otherwise = null, screen = scan) {
 async function matchSkill(text, scan = null) {
   const skills = learnedSkills().filter((sk) => sharesWords(text, `${sk.title} ${sk.summary}`));
   if (!skills.length) return null;
-  const found = await findSkill(cfg.anthropicApiKey, text, skills, scan ? screenContext(scan) : '');
+  const found = await findSkill(cfg.anthropicApiKey, text, skills, [scan ? screenContext(scan) : '', turnHistory ? `\nRecent conversation:\n${turnHistory}` : ''].join(''));
   console.log(`[skills] "${text}" → ${found.id || 'none'} (${found.match})`);
   return found;
 }
@@ -641,7 +685,10 @@ async function matchSkill(text, scan = null) {
 let pendingClarify = null;
 ipcMain.handle('confirm', async (_e, rawText) => {
   sessionLog.convo('You', rawText, '[answering]');
+  turnHistory = convo.forPrompt();
+  convo.add('user', rawText);
   const res = await confirmReply(rawText);
+  remember(rawText, res);
   sessionLog.convoFromReply(res, agent);
   return res;
 });
@@ -757,6 +804,7 @@ function startImprovGuide(goal) {
   const brain = new Improviser(cfg.anthropicApiKey, { mode: 'guide' });
   const w = new ImprovisedWalkthrough({
     goal,
+    history: turnHistory,
     brain,
     scan: scanFrontWindow,
     fingerprint: screenFingerprint,
@@ -983,6 +1031,16 @@ async function askJarvis(raw) {
     return ask(text);
   }
 
+  // Carrying on with what he just did here ("and that one?" after pointing at
+  // something in a screenshot): do the same kind of thing.
+  const follow = Guide.available(cfg) ? convo.followUp(text, lastScreenKey) : null;
+  if (follow === 'look' || follow === 'answer') {
+    console.log(`[jarvis] follow-up to the last ${follow}`);
+    const { scan: seen } = await scanForAsk();
+    const res = seen ? (follow === 'look' ? await visualAnswer(text, seen, 'jarvis', 'a follow-up to what was just looked at') : await screenAnswer(text, seen, 'jarvis')) : null;
+    if (res) return res;
+  }
+
   try {
     const basic = await jarvisBasics(text, p);
     if (basic) return basic;
@@ -1093,6 +1151,7 @@ function beginFreestyle(goal, related = null) {
   if (related) console.log(`[jarvis] with "${related.map.title}" as reference`);
   const run = new JarvisFreestyle({
     goal,
+    history: turnHistory,
     related,
     improviser: new Improviser(cfg.anthropicApiKey, { mode: 'do', address: cfg.jarvis.address }),
     s: p.s,

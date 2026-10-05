@@ -730,8 +730,9 @@ class JarvisFreestyle extends JarvisRun {
   //   improviser  an Improviser in 'do' mode (or a fake in tests)
   //   related     optional: a learned skill that may be this task (a "maybe"
   //               match), given to Claude as an expert's reference
-  constructor({ goal, improviser, related = null, ...deps }) {
+  constructor({ goal, improviser, related = null, history = '', ...deps }) {
     super({ skill: { map: { title: goal, steps: [] }, session: { events: [] } }, actions: [], plan: { can_run: true, inputs: [], actions: [], step_lines: [] }, ...deps });
+    this.history = history;
     this.goal = goal;
     this.brain = improviser;
     this.ranAnyway = new Set(); // commands to run even though the project is already up
@@ -739,7 +740,7 @@ class JarvisFreestyle extends JarvisRun {
   }
 
   async runInner() {
-    let note = `The user asked: "${this.goal}"`;
+    let note = `${this.history ? `Recent conversation (for context):\n${this.history}\n\n` : ''}The user asked: "${this.goal}"`;
     if (this.related) note += `\n\nAn expert taught you a task that may be this one, or close to it. Where it fits, follow its steps and rules rather than improvising:\n${relatedText(this.related)}`;
     let failures = 0;
     let unanswered = 0;

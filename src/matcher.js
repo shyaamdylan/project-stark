@@ -6,6 +6,9 @@ const FILLER = new Set([
   'to', 'at', 'can', 'you', 'please', 'pls', 'i', 'want', 'need', 'click', 'press', 'tap', 'hit', 'go',
   'button', 'buttons', 'btn', 'link', 'icon', 'tab', 'menu', 'option', 'thing', 'one', 'that', 'this',
   'my', 'for', 'on', 'of', 'it', 'how', 'do', 'get', 'open', 'hey', 'buddy', 'say', 'says', 'called', 'labelled', 'labeled',
+  // Phrasing around the name, not part of it ("where does it say Recents", "could you now show me X").
+  'does', 'did', 'could', 'would', 'will', 'now', 'just', 'also', 'again', 'next', 'then', 'and', 'about', 'word', 'words',
+  'text', 'label', 'written', 'there', 'here', 'which', 'onscreen', 'screen', 'see', 'spot', 'highlight', 'friday', 'jarvis',
 ]);
 
 // Words in the request that hint at a type of control.

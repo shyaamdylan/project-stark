@@ -35,6 +35,15 @@ she gets something wrong, give her more of those facts rather than another rule.
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
 
+## Conversation memory
+
+`src/convo.js` keeps the last few exchanges (5 minutes, one line each, with what was done:
+pointed at X, looked at a screenshot, started a lesson). Every Claude call made for a request
+gets it as `turnHistory`, and `followUp()` is checked before a request is sorted into a task, a
+question or pointing, so "now the left hand" carries on from "show me the nose". When a reply
+looks like it forgot the conversation, check that the call got `turnHistory` and that the
+follow-up check ran, rather than adding phrase rules.
+
 ## Session logs
 
 Every run writes the terminal output plus the conversation (what was said or typed, what Friday
