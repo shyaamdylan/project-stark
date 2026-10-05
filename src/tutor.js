@@ -17,7 +17,7 @@ const { Anthropic } = require('@anthropic-ai/sdk');
 const { Replay } = require('./replay');
 const { describeScreen, describeSkill } = require('./guide');
 const { ScreenObserver } = require('./observe');
-const { imageBlock, boxToScreen, POINT_SCHEMA } = require('./vision');
+const { imageBlock, boxToScreen, screenshotNote, POINT_SCHEMA } = require('./vision');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 40;
@@ -25,7 +25,7 @@ const KEEP_SCREENS = 2;
 
 const SYSTEM = `You are Friday, a warm, sharp teacher who lives as a small glowing orb on someone's Mac. You're teaching them a task an expert showed you (the lesson plan below). This is a real lesson, a two-way conversation, not a click-through tutorial.
 
-You see their screen two ways: a screenshot of the front window (go by it), and the app's accessibility list, numbered lines "id | role | "label" | app | x,y", which gives exact positions for the controls it describes. You also get a log of what they've done since you last spoke (clicks, typing, windows, where the keyboard is) and, if they spoke, what they said.
+You see their screen two ways: a screenshot of their screen with which window is where (go by it; they may mean a window that isn't in front), and the app's accessibility list, numbered lines "id | role | "label" | app | x,y", which gives exact positions for the controls it describes. You also get a log of what they've done since you last spoke (clicks, typing, windows, where the keyboard is) and, if they spoke, what they said.
 
 How to teach:
 - Keep the goal in mind and the plan as your structure, but adapt to what they actually do.
@@ -85,7 +85,7 @@ class Tutor {
       const recent = i >= this.turns.length - KEEP_SCREENS;
       const text = `${t.text}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}`;
       // Only the latest screenshot goes: older ones cost tokens and are out of date.
-      if (i === last && t.image) out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `Screenshot: ${t.image.width}×${t.image.height} pixels.\n${text}` }] });
+      if (i === last && t.image) out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `${screenshotNote(t.image)}\n${text}` }] });
       else out.push({ role: 'user', content: text });
       if (t.reply) out.push({ role: 'assistant', content: t.reply });
     });

@@ -84,7 +84,7 @@ function screenWindows(excludePid) {
     var min = float ? 20 : 60;
     if (!b || b.Width < min || b.Height < min) continue;
     if (w.kCGWindowAlpha === 0) continue;
-    out.push({ pid: w.kCGWindowOwnerPID, name: w.kCGWindowOwnerName, z: out.length, x: b.X, y: b.Y, w: b.Width, h: b.Height, float: float });
+    out.push({ pid: w.kCGWindowOwnerPID, name: w.kCGWindowOwnerName, title: w.kCGWindowName || '', z: out.length, x: b.X, y: b.Y, w: b.Width, h: b.Height, float: float });
   }
   return out;
 }
@@ -587,6 +587,7 @@ function run(argv) {
 
   return JSON.stringify({
     app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', frame: { x: owner.x, y: owner.y, w: owner.w, h: owner.h }, document: doc, selection: sel, focused: focused, apps: apps.map(function (a) { return a.name; }),
+    windows: wins.slice(0, 15).map(function (w) { return { app: w.name, title: w.title, x: w.x, y: w.y, w: w.w, h: w.h, float: w.float }; }),
     statusPids: statusPids, visited: visited, truncated: truncated, ms: Date.now() - started, elements: elements,
   });
 }

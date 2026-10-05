@@ -61,6 +61,9 @@ function loadConfig(userDataDir) {
     // "always": every question, pointing request, lesson turn and Jarvis step
     // sees a screenshot. "smart": only when accessibility isn't enough.
     screenMode: /^smart$/i.test(get('SCREEN_MODE', 'always')) ? 'smart' : 'always',
+    // What a screenshot covers: "screen" (the whole display the front window is
+    // on, so windows behind it and side by side count) or "window" (front only).
+    screenArea: /^window$/i.test(get('SCREEN_AREA', 'screen')) ? 'window' : 'screen',
     // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
     jarvis: {
       // ElevenLabs "George": a warm, mature British voice.

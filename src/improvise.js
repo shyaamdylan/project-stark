@@ -20,7 +20,7 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { describeScreen } = require('./guide');
 const { screenContext } = require('./observe');
-const { imageBlock, boxToScreen, POINT_SCHEMA } = require('./vision');
+const { imageBlock, boxToScreen, screenshotNote, POINT_SCHEMA } = require('./vision');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 20;
@@ -41,7 +41,7 @@ Use status "done" only when the screen shows the goal is reached.
 Vague words ("this", "it", "that", "here") mean what's on their screen: the front window, the file it has open, the selected text, or the field they're in. Go with the most sensible reading rather than asking.`;
 
 // How to read what's on screen, for both modes: the screenshot first.
-const SEEING = `Each turn you see a screenshot of the front window (when one could be taken): go by it. The numbered list beside it is the app's accessibility description, with exact positions for the controls it describes. To point at or click something, use its target_id when it's in the list (exact); when it isn't (part of a picture, a canvas, something the app doesn't describe), give action.point instead: its bounding box in the screenshot's own pixels (x, y from the top left, w, h) with a short label, and target_id null. Otherwise point is null.`;
+const SEEING = `Each turn you see a screenshot (when one could be taken) of their whole screen or the front window, with which window is where: go by it. They may mean a window that isn't in front, or several at once. The numbered list beside it is the app's accessibility description, with exact positions for the controls it describes. To point at or click something, use its target_id when it's in the list (exact); when it isn't (part of a picture, a canvas, something the app doesn't describe), give action.point instead: its bounding box in the screenshot's own pixels (x, y from the top left, w, h) with a short label, and target_id null. Otherwise point is null.`;
 
 const SCREEN_FORMAT = `Each turn you get what happened since your last step, then a numbered list of what's visible on screen, from macOS accessibility. Every line looks like:
   id | role | "label" | app | x,y
@@ -139,7 +139,7 @@ class Improviser {
       const text = `${note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}`;
       // Only the latest screenshot is sent: older ones cost tokens and are out of date.
       if (i === last && t.image) {
-        out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `Screenshot: ${t.image.width}×${t.image.height} pixels.\n${text}` }] });
+        out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `${screenshotNote(t.image)}\n${text}` }] });
       } else out.push({ role: 'user', content: t.image ? `${text}\n(screenshot from then omitted)` : text });
       if (t.reply) out.push({ role: 'assistant', content: t.reply });
     });

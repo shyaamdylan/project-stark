@@ -1,8 +1,9 @@
 // Seeing the screen through screenshots.
 //
 // By default (SCREEN_MODE=always) every Claude turn gets a screenshot of the
-// front window (the orb kept out by content protection), plus accessibility's
-// list of controls, which gives exact positions for what it describes. In
+// screen the front window is on (SCREEN_AREA=window: the front window only),
+// with the orb kept out by content protection, plus accessibility's list of
+// controls, which gives exact positions for what it describes. In
 // SCREEN_MODE=smart, needsVision() decides when a look is worth it. Every look
 // is logged with its reason.
 //
@@ -84,13 +85,13 @@ const VOICES = {
 function system(voice) {
   return `${voice}
 
-You can see a screenshot of the front window on their Mac: that's what to go by. You also get the app's accessibility list (numbered lines "id | role | "label" | app | x,y", in screen points), which gives exact positions for the controls it describes but says nothing about pictures. Vague words ("this", "it", "that box") mean what's on screen.
+You can see a screenshot of their Mac (the whole screen, or the front window when that's all it shows): that's what to go by. They may mean a window that isn't in front, or several at once ("compare these two"); the window list says which is where. You also get the accessibility list (numbered lines "id | role | "label" | app | x,y", in screen points), which gives exact positions for the controls it describes but says nothing about pictures. Vague words ("this", "it", "that box") mean what's on screen.
 
 - kind "answer": answer in one to three short spoken sentences (no markdown or coordinates). If you're talking about a particular thing on screen, point at it: if it's in the list (a button, a field, a link, a menu), give its target_id, which is exact; otherwise (a part of a picture, a diagram, a chart, anything not in the list) give point, its bounding box in the screenshot's own pixels (x, y from the top left, w, h), tight around it, with a short label. Use at most one of the two; both null if there's nothing to point at. Only point at something you can actually see; if it isn't there, say so.
 - kind "task": they want something done or walked through step by step rather than explained or shown. say "" and both null.`;
 }
 
-// image: { data (base64 JPEG), width, height } of the front window only.
+// image: { data (base64 JPEG), width, height, frame, area, windows } from snap/capture.
 async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', address = '', history = '', client = null }) {
   const c = client || new Anthropic({ apiKey });
   const voice = agent === 'jarvis' ? VOICES.jarvis(address) : VOICES.friday;
@@ -107,7 +108,7 @@ async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', a
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image.data } },
-          { type: 'text', text: `${history ? `Recent conversation (read the question in light of it; "now the left hand" carries on from what came before):\n${history}\n\n` : ''}They asked: "${question}"\n\nThe screenshot is ${image.width}×${image.height} pixels. What's in front of them: ${screenContext(scan)}\n\nAccessibility list:\n${list.text || '(it describes nothing here)'}` },
+          { type: 'text', text: `${history ? `Recent conversation (read the question in light of it; "now the left hand" carries on from what came before):\n${history}\n\n` : ''}They asked: "${question}"\n\n${screenshotNote(image)}\nWhat's in front of them: ${screenContext(scan)}\n\nAccessibility list:\n${list.text || '(it describes nothing here)'}` },
         ],
       },
     ],
@@ -135,7 +136,22 @@ function elementAtPoint(rect, elements) {
   return hits.sort((a, b) => (a.z || 0) - (b.z || 0) || a.w * a.h - b.w * b.h)[0] || null;
 }
 
-// A box in screenshot pixels -> a rect in screen points, kept inside the window.
+// What a screenshot shows, for the prompt: its size, and which window is where
+// in it (front first), so "the other window" or "both of these" can be placed.
+function screenshotNote(image) {
+  if (!image) return '';
+  const f = image.frame;
+  const head = `Screenshot: ${image.width}×${image.height} pixels, ${image.area === 'screen' ? 'their whole screen' : 'the front window'}.`;
+  if (image.area !== 'screen' || !f || !f.w || !f.h) return head;
+  const kx = image.width / f.w;
+  const ky = image.height / f.h;
+  const lines = (image.windows || [])
+    .filter((w) => w.x < f.x + f.w && w.y < f.y + f.h && w.x + w.w > f.x && w.y + w.h > f.y)
+    .map((w, i) => `${i === 0 ? 'front' : w.float ? 'panel' : 'behind'}: ${w.app}${w.title ? ` "${w.title}"` : ''} at ${Math.round((w.x - f.x) * kx)},${Math.round((w.y - f.y) * ky)} size ${Math.round(w.w * kx)}×${Math.round(w.h * ky)}`);
+  return lines.length ? `${head} Windows in it, front first (a window behind can be partly covered):\n${lines.join('\n')}` : head;
+}
+
+// A box in screenshot pixels -> a rect in screen points, kept inside the captured area.
 function boxToScreen(point, image, frame) {
   if (!point || !image || !frame || !image.width || !image.height) return null;
   const kx = frame.w / image.width;
@@ -148,4 +164,4 @@ function boxToScreen(point, image, frame) {
   return { x, y, w, h, label: point.label || '' };
 }
 
-module.exports = { needsVision, lookAtScreen, boxToScreen, elementAtPoint, imageBlock, POINT_SCHEMA, VISUAL, RECENT_MS };
+module.exports = { needsVision, lookAtScreen, boxToScreen, elementAtPoint, imageBlock, screenshotNote, POINT_SCHEMA, VISUAL, RECENT_MS };

@@ -29,7 +29,7 @@ today's bug report. When something goes wrong:
 A lesson is `src/tutor.js`: the replay (`src/replay.js`) moves through the Work Map instantly
 while the user is on track; the tutor (Claude) is only asked when they go off it, go quiet,
 can't find something, or say something. `src/observe.js` gives it the facts: what they clicked,
-typed, and which window and field they're in, from the accessibility scan, plus a screenshot of the front window each turn. When
+typed, and which window and field they're in, from the accessibility scan, plus a screenshot of the screen each turn. When
 she gets something wrong, give her more of those facts rather than another rule.
 
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
@@ -71,7 +71,8 @@ end, and say so when you do: it acts on the real screen.
   shell, and system or git-history changes are refused.
 - Risky clicks and keys need a yes. Passwords and codes are never typed or read.
 - Screenshots (`src/vision.js`): every Claude turn by default (`SCREEN_MODE=always`), of the
-  front window only, with the orb kept out (content protection). Pointing can use a screenshot
+  display the front window is on (`SCREEN_AREA=window` for the front window only), with the orb
+  kept out (content protection) and a list of which window is where. Pointing can use a screenshot
   box; a click only goes to a control accessibility confirms at that spot (`elementAtPoint`),
   otherwise Jarvis points and asks the user to click. Every look is logged with its reason.
 - File access is limited to the home folder, never hidden folders, `~/Library` or

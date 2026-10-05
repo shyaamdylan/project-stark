@@ -425,36 +425,37 @@ let visionPermissionToldAt = 0;
 let visionOn = null;
 const visionAllowed = () => (visionOn === null ? cfg.visionEnabled : visionOn) && Guide.available(cfg);
 
-// One JPEG of the front window, with the orb and its bubble hidden.
+// One JPEG of what they're looking at: the whole display the front window is on
+// (SCREEN_AREA=window: just the front window). The overlay is content-protected,
+// so the orb never appears in it.
 async function captureFront(scan) {
   if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') return { denied: true };
-  const frame = scan && scan.frame;
-  if (!frame || !frame.w || !frame.h) return null;
-  const display = screen.getDisplayMatching({ x: Math.round(frame.x), y: Math.round(frame.y), width: Math.round(frame.w), height: Math.round(frame.h) });
+  const fw = scan && scan.frame;
+  if (!fw || !fw.w || !fw.h) return null;
+  const display = screen.getDisplayMatching({ x: Math.round(fw.x), y: Math.round(fw.y), width: Math.round(fw.w), height: Math.round(fw.h) });
+  const whole = cfg.screenArea === 'screen';
+  const b = display.bounds;
+  const frame = whole ? { x: b.x, y: b.y, w: b.width, h: b.height } : fw;
   const sf = display.scaleFactor || 1;
-  try {
-    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.bounds.width * sf), height: Math.round(display.bounds.height * sf) } });
-    const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
-    if (!src || src.thumbnail.isEmpty()) return null;
-    const img = src.thumbnail;
-    const k = img.getSize().width / display.bounds.width;
-    const rect = {
-      x: Math.max(0, Math.round((frame.x - display.bounds.x) * k)),
-      y: Math.max(0, Math.round((frame.y - display.bounds.y) * k)),
-      width: Math.round(frame.w * k),
-      height: Math.round(frame.h * k),
-    };
-    rect.width = Math.min(rect.width, img.getSize().width - rect.x);
-    rect.height = Math.min(rect.height, img.getSize().height - rect.y);
-    let shot = img.crop(rect);
-    // Claude reads images up to about 1568 px on the long side; bigger only costs more.
-    const long = Math.max(rect.width, rect.height);
-    if (long > 1568) shot = shot.resize(rect.width >= rect.height ? { width: 1568 } : { height: 1568 });
-    const size = shot.getSize();
-    return { data: shot.toJPEG(80).toString('base64'), width: size.width, height: size.height, frame };
-  } finally {
-    // (The overlay is content-protected, so it never appears in the capture.)
-  }
+  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(b.width * sf), height: Math.round(b.height * sf) } });
+  const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
+  if (!src || src.thumbnail.isEmpty()) return null;
+  const img = src.thumbnail;
+  const k = img.getSize().width / b.width;
+  const rect = {
+    x: Math.max(0, Math.round((frame.x - b.x) * k)),
+    y: Math.max(0, Math.round((frame.y - b.y) * k)),
+    width: Math.round(frame.w * k),
+    height: Math.round(frame.h * k),
+  };
+  rect.width = Math.min(rect.width, img.getSize().width - rect.x);
+  rect.height = Math.min(rect.height, img.getSize().height - rect.y);
+  let shot = img.crop(rect);
+  // Claude reads images up to about 1568 px on the long side; bigger only costs more.
+  const long = Math.max(rect.width, rect.height);
+  if (long > 1568) shot = shot.resize(rect.width >= rect.height ? { width: 1568 } : { height: 1568 });
+  const size = shot.getSize();
+  return { data: shot.toJPEG(80).toString('base64'), width: size.width, height: size.height, frame, area: whole ? 'screen' : 'window', windows: scan.windows || [] };
 }
 
 // Every request looks at the screen, unless set to "smart" (only when needed).
@@ -507,7 +508,7 @@ async function visualAnswer(text, scan, who, why) {
     return null;
   }
   if (!image) return null;
-  console.log(`[vision] looking at ${scan.app}${scan.window ? ` — "${scan.window}"` : ''} (${image.width}×${image.height}) because ${why}`);
+  console.log(`[vision] looking at ${image.area === 'screen' ? 'the screen, front: ' : ''}${scan.app}${scan.window ? ` — "${scan.window}"` : ''} (${image.width}×${image.height}) because ${why}`);
   let r;
   try {
     r = await lookAtScreen(cfg.anthropicApiKey, { question: text, image, scan, agent: who, address: cfg.jarvis.address, history: turnHistory });

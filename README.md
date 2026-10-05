@@ -19,8 +19,8 @@ melts back in.
 Ask it *how* to do something ("how do I make a new folder?") and it walks you through it
 step by step with Claude, hopping to the next button each time you click.
 
-Inspired by [Clicky](https://github.com/farzaa/clicky). Claude sees a screenshot of the front
-window every turn, alongside the real buttons macOS Accessibility describes (exact positions).
+Inspired by [Clicky](https://github.com/farzaa/clicky). Claude sees a screenshot of your screen
+every turn, alongside the real buttons macOS Accessibility describes (exact positions).
 Finding a button by its exact name still needs no AI at all.
 
 ![preview](preview.png)
@@ -151,15 +151,16 @@ open, any text you've selected, or the field you're in.
 ### Seeing the screen
 
 Every time Claude is asked something (a question, a lesson turn, a best-effort step, Jarvis
-doing something), it gets **a screenshot of the front window** plus Accessibility's list of
-controls. The screenshot is what it goes by, so diagrams, photos, canvases and apps that describe
+doing something), it gets **a screenshot of the screen the front window is on**, a note of which window
+is where, plus Accessibility's list of controls. So "the other window", "the one on the left"
+or "compare these two" work, not just the window in front. The screenshot is what it goes by, so diagrams, photos, canvases and apps that describe
 nothing are all fair game; the list gives exact positions for the controls it does describe.
 
 - **Pointing** works at anything visible: a list control exactly, otherwise a box on the screenshot.
 - **Clicking** only ever goes to a control Accessibility confirms at that spot. If Jarvis sees
   something but nothing is confirmed there, he points at it and asks you to click.
-- The orb is kept out of screenshots (content protection), only the front window is captured,
-  and the terminal and session log note every look.
+- The orb is kept out of screenshots (content protection). `SCREEN_AREA=window` captures only
+  the front window instead (more private, but blind to the others). The terminal and session log note every look.
 - Saying an exact button name ("where's Export") still points instantly, with no screenshot, and
   following a taught lesson step by step still runs on Accessibility (no AI while you're on track).
 

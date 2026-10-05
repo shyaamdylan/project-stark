@@ -76,3 +76,18 @@ test('nothing there to confirm: he points and asks you to click, never clicks a 
   assert.ok(said.some((x) => /can't be sure of clicking it precisely/.test(x)), said.join(' | '));
   assert.equal(res.status, 'done');
 });
+
+test('a whole-screen screenshot tells Claude which window is where, front first', () => {
+  const { screenshotNote } = require('../src/vision');
+  const shot = { width: 1000, height: 500, area: 'screen', frame: { x: 0, y: 0, w: 2000, h: 1000 }, windows: [
+    { app: 'Editor', title: 'notes.txt', x: 0, y: 0, w: 1000, h: 1000 },
+    { app: 'Browser', title: 'Diagram', x: 1000, y: 0, w: 1000, h: 1000 },
+    { app: 'Elsewhere', title: 'Other display', x: 3000, y: 0, w: 500, h: 500 },
+  ] };
+  const note = screenshotNote(shot);
+  assert.match(note, /their whole screen/);
+  assert.match(note, /front: Editor "notes.txt" at 0,0 size 500×500/);
+  assert.match(note, /behind: Browser "Diagram" at 500,0 size 500×500/);
+  assert.doesNotMatch(note, /Elsewhere/);
+  assert.match(screenshotNote({ ...shot, area: 'window' }), /the front window\.$/);
+});
