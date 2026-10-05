@@ -45,13 +45,16 @@ function loadConfig(userDataDir) {
     loadedFrom,
     elevenLabs: {
       apiKey: get('ELEVENLABS_API_KEY'),
-      voiceId: get('ELEVENLABS_VOICE_ID', '21m00Tcm4TlvDq8EgDs7'),
-      modelId: get('ELEVENLABS_MODEL_ID', 'eleven_flash_v2_5'),
+      voiceId: get('ELEVENLABS_VOICE_ID', 'cgSgspJ2msm6clMCkdW9'),
+      modelId: get('ELEVENLABS_MODEL_ID', 'eleven_v4_turbo'),
     },
     // Reserved for future features; nothing reads these yet.
     anthropicApiKey: get('ANTHROPIC_API_KEY'),
     openaiApiKey: get('OPENAI_API_KEY'),
     voiceEnabled: get('VOICE_ENABLED', '1') !== '0',
+    // Say this to wake the buddy ("Hey Alpha, how do I…"). Needs ELEVENLABS_API_KEY.
+    wakeWord: get('WAKE_WORD', 'alpha'),
+    wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
   };
 }
 

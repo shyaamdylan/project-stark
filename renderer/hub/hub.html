@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src file:; img-src 'self' data: file:" />
+    <title>Skills</title>
+    <link rel="stylesheet" href="hub.css" />
+  </head>
+  <body>
+    <aside>
+      <div class="drag"></div>
+      <div class="brand"><span class="dot"></span>Skills</div>
+      <button id="teach" class="primary">＋ Teach a new skill</button>
+      <input id="search" type="search" placeholder="Search skills" />
+      <ul id="list"></ul>
+    </aside>
+    <main>
+      <div class="drag"></div>
+      <div id="empty" class="empty hidden">
+        <div class="orb"></div>
+        <h2>No skills yet</h2>
+        <p>Teach it something: press <b>Teach a new skill</b>, then just do the task while it watches. Talk it through as you go if you like.</p>
+      </div>
+      <div id="viewer" class="hidden">
+        <header>
+          <div>
+            <h1 id="title"></h1>
+            <div id="meta"></div>
+          </div>
+          <div class="actions">
+            <button id="open">Open in browser</button>
+            <button id="reveal">Show in Finder</button>
+            <button id="delete" class="danger">Delete</button>
+          </div>
+        </header>
+        <iframe id="frame" title="Work Map"></iframe>
+      </div>
+    </main>
+    <script src="hub.js"></script>
+  </body>
+</html>

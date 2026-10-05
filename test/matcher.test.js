@@ -52,3 +52,20 @@ test('nonsense returns no match but offers suggestions list', () => {
 test('empty request returns no match', () => {
   assert.strictEqual(findBest('the button please', screen).match, null);
 });
+
+test('hyphenated labels match the joined word, whatever the dash', () => {
+  const items = [
+    { role: 'AXMenuBarItem', label: 'Wi‑Fi, connected, 3 bars', x: 1500, y: 0, w: 30, h: 24, z: 0 },
+    { role: 'AXMenuBarItem', label: 'Battery', x: 1540, y: 0, w: 30, h: 24, z: 0 },
+  ];
+  assert.equal(findBest('wifi', items).match.label, 'Wi‑Fi, connected, 3 bars');
+  assert.equal(findBest('wi-fi', items).match.label, 'Wi‑Fi, connected, 3 bars');
+});
+
+test('equal matches prefer the window nearer the front', () => {
+  const items = [
+    { role: 'AXButton', label: 'Save', x: 10, y: 10, w: 40, h: 20, z: 2 },
+    { role: 'AXButton', label: 'Save', x: 10, y: 500, w: 40, h: 20, z: 0 },
+  ];
+  assert.equal(findBest('save', items).match.z, 0);
+});

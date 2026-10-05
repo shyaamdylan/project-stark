@@ -34,5 +34,9 @@
         "NSAppleEventsUsageDescription": "Project Alpha uses System Events to find buttons in the app you're using so it can point at them."
       }
     }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
+    "uiohook-napi": "^1.5.5"
   }
 }

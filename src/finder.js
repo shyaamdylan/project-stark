@@ -32,12 +32,41 @@ function runJxa(opts, timeoutMs = 15000) {
   });
 }
 
-function scanFrontApp({ activate = true } = {}) {
-  return runJxa({ excludePid: process.pid, activate, timeoutMs: 7000, maxElements: 3000 });
+// Finding which apps own menu bar status icons means asking every running app
+// (~2s). They rarely change, so remember the answer for a few minutes.
+const STATUS_TTL_MS = 5 * 60 * 1000;
+let statusCache = null; // { pids, at }
+
+async function scanFrontApp({ activate = true } = {}) {
+  const fresh = statusCache && Date.now() - statusCache.at < STATUS_TTL_MS;
+  const result = await runJxa({
+    excludePid: process.pid, activate, timeoutMs: 7000, maxElements: 8000,
+    statusPids: fresh ? statusCache.pids : undefined,
+  });
+  if (!fresh && result.statusPids) statusCache = { pids: result.statusPids, at: Date.now() };
+  return result;
+}
+
+// Just the front app, for watching someone work: skips the Dock, status icons
+// and other apps' windows, so it can run every second.
+function scanFrontWindow() {
+  return runJxa({ excludePid: process.pid, frontOnly: true, timeoutMs: 2500, maxElements: 4000 }, 6000);
+}
+
+// A cheap summary of the screen's state (windows, focus, open menu). Compare two
+// of these to tell whether the user has done something.
+async function screenFingerprint() {
+  const r = await runJxa({ excludePid: process.pid, fingerprint: true }, 5000);
+  return r.fingerprint || '';
+}
+
+// Run one scan in the background so the first real request is fast.
+function warmUp() {
+  return scanFrontApp({ activate: false }).catch(() => {});
 }
 
 function refocusFrontApp() {
   return runJxa({ excludePid: process.pid, activateOnly: true }).catch(() => {});
 }
 
-module.exports = { scanFrontApp, refocusFrontApp };
+module.exports = { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp, screenFingerprint };

@@ -25,7 +25,7 @@ const GENERIC_HINTS = new Set(['button', 'link', 'tab', 'menu', 'checkbox', 'fie
 // How "button-like" each role is. Plain text and images rank below real controls.
 const ROLE_WEIGHT = {
   AXButton: 1, AXMenuButton: 1, AXPopUpButton: 0.98, AXLink: 0.97, AXTab: 0.97, AXRadioButton: 0.95,
-  AXCheckBox: 0.95, AXMenuBarItem: 0.93, AXSearchField: 0.93, AXTextField: 0.9, AXComboBox: 0.9,
+  AXCheckBox: 0.95, AXDockItem: 0.95, AXMenuItem: 0.93, AXMenuBarItem: 0.93, AXSearchField: 0.93, AXTextField: 0.9, AXComboBox: 0.9,
   AXDisclosureTriangle: 0.9, AXSlider: 0.85, AXIncrementor: 0.85, AXColorWell: 0.85,
   AXCell: 0.8, AXRow: 0.78, AXImage: 0.75, AXStaticText: 0.72,
 };
@@ -34,6 +34,8 @@ function normalize(s) {
   return String(s || '')
     .toLowerCase()
     .replace(/[’']/g, '')
+    // Hyphenated words read as one: "Wi‑Fi" (any dash) matches "wifi".
+    .replace(/([a-z0-9])[-\u2010-\u2015]([a-z0-9])/g, '$1$2')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
@@ -113,7 +115,8 @@ function rankElements(text, elements) {
       return { el, score };
     })
     .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score || a.el.y - b.el.y);
+    // Ties go to the window nearest the front, then to whatever is higher up.
+    .sort((a, b) => b.score - a.score || (a.el.z || 0) - (b.el.z || 0) || a.el.y - b.el.y);
 
   return { query, ranked };
 }

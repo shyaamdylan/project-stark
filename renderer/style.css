@@ -1,8 +1,12 @@
 :root {
-  --ink: #241a4d;
+  --ink: #12204a;
+  --core: #5ee7ff;
   --accent: #3b82f6;
-  --accent-glow: rgba(59, 130, 246, 0.45);
+  --accent-glow: rgba(94, 231, 255, 0.5);
   --bubble: #ffffff;
+  --orb: 64px; /* body diameter */
+  --inset: 34px; /* gap from the screen corner to the orb */
+  --level: 0; /* 0..1 voice loudness, set from JS while talking */
 }
 
 html,
@@ -20,192 +24,173 @@ body {
   display: none !important;
 }
 
-/* ---------- buddy ---------- */
+/* ---------- the orb ---------- */
 
 #buddy {
+  transition: filter 0.6s ease;
+}
+/* Can't find it: the energy cools to a soft rose for a moment. */
+#buddy.worried {
+  filter: hue-rotate(150deg) saturate(1.15);
+}
+
+#orb {
   position: absolute;
-  bottom: 4px;
-  left: 0;
-  width: 140px;
-  height: 160px;
-  transition-property: left;
-  transition-timing-function: cubic-bezier(0.45, 0, 0.3, 1);
-}
-
-#char {
-  overflow: visible;
+  right: var(--inset);
+  bottom: var(--inset);
+  width: var(--orb);
+  height: var(--orb);
+  border-radius: 50%;
   cursor: pointer;
-  filter: drop-shadow(0 6px 10px rgba(40, 20, 120, 0.25));
 }
 
-#shadow {
-  fill: rgba(0, 0, 0, 0.18);
-  transform-origin: 70px 152px;
-  animation: shadow 2.4s ease-in-out infinite;
+/* The goo layer is much bigger than the orb so the droplet has room to
+   stretch away before it detaches. It's centred on the orb. */
+#goo-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  /* No surrounding glow; voice loudness brightens the orb itself instead. */
+  filter: brightness(calc(1 + var(--level) * 0.35));
+}
+#goo {
+  position: absolute;
+  left: -200px;
+  top: -200px;
+  width: 400px;
+  height: 400px;
+  filter: url(#goo);
+}
+#body,
+#neck,
+#drop {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+}
+#body {
+  width: var(--orb);
+  height: var(--orb);
+  margin: calc(var(--orb) / -2) 0 0 calc(var(--orb) / -2);
+  background: radial-gradient(circle at 42% 38%, #ffffff 0%, #c8f6ff 16%, var(--core) 36%, var(--accent) 68%, #5b3df0 100%);
+  animation: pulse-body 3.6s ease-in-out infinite;
+}
+/* Joins body and droplet while it stretches, then thins out and snaps. */
+#neck {
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  background: var(--core);
+}
+#drop {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  background: radial-gradient(circle at 40% 40%, #ffffff 0%, var(--core) 45%, var(--accent) 100%);
 }
 
-#bodygroup {
-  animation: bob 2.4s ease-in-out infinite;
-  transform-origin: 70px 140px;
+/* Moving light inside the orb. Clipped to the orb's circle. */
+#plasma {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  pointer-events: none;
+  animation: pulse-body 3.6s ease-in-out infinite;
+}
+.swirl {
+  position: absolute;
+  inset: -30%;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  filter: blur(5px);
+  opacity: 0.75;
+}
+.swirl.a {
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.85) 40deg, transparent 110deg, rgba(160, 120, 255, 0.7) 200deg, transparent 260deg);
+  animation: spin 7s linear infinite;
+}
+.swirl.b {
+  background: conic-gradient(from 90deg, transparent 0deg, rgba(94, 231, 255, 0.9) 60deg, transparent 140deg, rgba(255, 255, 255, 0.5) 250deg, transparent 320deg);
+  animation: spin 11s linear infinite reverse;
+}
+/* A bright spot that leans toward the mouse, so it feels like it's paying attention. */
+#glint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%);
+  transition: transform 0.25s ease-out;
 }
 
-#belly {
-  fill: rgba(255, 255, 255, 0.18);
+/* thinking: the energy churns */
+#buddy.thinking .swirl.a {
+  animation-duration: 1.1s;
 }
-.cheek {
-  fill: #ff8fb8;
-  opacity: 0.55;
+#buddy.thinking .swirl.b {
+  animation-duration: 1.6s;
 }
-.foot {
-  fill: #4a31c9;
-}
-
-.arm line {
-  stroke: #5a3fe0;
-  stroke-width: 9;
-  stroke-linecap: round;
-}
-.arm circle {
-  fill: #7b61ff;
-}
-.arm {
-  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-#armL {
-  transform: rotate(115deg);
-}
-#armR {
-  transform: rotate(65deg);
+/* prompt open: a touch brighter, like it's listening */
+#buddy.listening #goo-glow,
+#buddy.listening #plasma {
+  filter: brightness(1.15);
 }
 
-#antenna path {
-  stroke: #5a3fe0;
-  stroke-width: 4;
-  fill: none;
-  stroke-linecap: round;
-}
-#antenna circle {
-  fill: #ffd84d;
-}
-#antenna {
-  transform-origin: 70px 34px;
-  animation: wiggle 3.2s ease-in-out infinite;
+/* found it / clicked: a quick bright pop */
+#buddy.flare #orb {
+  animation: flare 0.7s ease-out;
 }
 
-.white {
-  fill: #fff;
+@keyframes pulse-body {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
 }
-.pupil {
-  fill: var(--ink);
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
-.glint {
-  fill: #fff;
-}
-.eye {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 0.07s;
-}
-#eyes.blink .eye {
-  transform: scaleY(0.08);
-}
-
-#mouth {
-  fill: none;
-  stroke: var(--ink);
-  stroke-width: 4;
-  stroke-linecap: round;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-#buddy.talking #mouth {
-  fill: #c2185b;
-  animation: talk 0.18s ease-in-out infinite alternate;
-}
-#buddy.worried #mouth {
-  transform: scaleY(-1);
-}
-
-/* walking: hop + shuffling feet */
-#buddy.walking #bodygroup {
-  animation: hop 0.32s ease-in-out infinite;
-}
-#buddy.walking #footL {
-  animation: step 0.32s ease-in-out infinite;
-}
-#buddy.walking #footR {
-  animation: step 0.32s ease-in-out infinite reverse;
-}
-
-/* thinking: little sway */
-#buddy.thinking #bodygroup {
-  animation: sway 0.9s ease-in-out infinite;
-}
-
-#buddy.excited #bodygroup {
-  animation: jump 0.5s ease-out 2;
-}
-
-@keyframes bob {
-  0%, 100% { transform: translateY(0) scale(1, 1); }
-  50% { transform: translateY(-5px) scale(0.98, 1.02); }
-}
-@keyframes shadow {
-  0%, 100% { transform: scaleX(1); }
-  50% { transform: scaleX(0.88); }
-}
-@keyframes hop {
-  0%, 100% { transform: translateY(0) rotate(-2deg); }
-  50% { transform: translateY(-9px) rotate(2deg); }
-}
-@keyframes step {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
-}
-@keyframes sway {
-  0%, 100% { transform: rotate(-4deg); }
-  50% { transform: rotate(4deg); }
-}
-@keyframes jump {
-  0% { transform: translateY(0) scale(1.08, 0.92); }
-  40% { transform: translateY(-22px) scale(0.95, 1.06); }
-  100% { transform: translateY(0) scale(1, 1); }
-}
-@keyframes wiggle {
-  0%, 100% { transform: rotate(-6deg); }
-  50% { transform: rotate(8deg); }
-}
-@keyframes talk {
-  from { transform: scaleY(0.6); }
-  to { transform: scaleY(1.5); }
+@keyframes flare {
+  0% { transform: scale(1); filter: brightness(1); }
+  35% { transform: scale(1.12); filter: brightness(1.4); }
+  100% { transform: scale(1); filter: brightness(1); }
 }
 
 /* ---------- speech bubble ---------- */
 
 #bubble {
   position: absolute;
-  bottom: 168px;
+  right: 18px;
+  bottom: calc(var(--inset) + var(--orb) + 22px);
   width: 250px;
   box-sizing: border-box;
   padding: 12px 14px;
   background: var(--bubble);
   color: var(--ink);
   border-radius: 18px;
-  box-shadow: 0 10px 30px rgba(30, 20, 80, 0.25), 0 0 0 1px rgba(30, 20, 80, 0.06);
+  box-shadow: 0 10px 30px rgba(20, 40, 90, 0.25), 0 0 0 1px rgba(20, 40, 90, 0.06);
   font-size: 14px;
   line-height: 1.35;
+  transform-origin: calc(100% - 50px) 100%;
   animation: pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   user-select: text;
 }
+/* Tail points down at the orb's centre. */
 #bubble::after {
   content: '';
   position: absolute;
   bottom: -9px;
-  left: var(--tail, 50%);
+  right: calc(var(--inset) + var(--orb) / 2 - 18px - 9px);
   width: 18px;
   height: 18px;
   background: var(--bubble);
-  transform: translateX(-50%) rotate(45deg);
+  transform: rotate(45deg);
   border-radius: 3px;
 }
 #say:empty {
@@ -217,7 +202,7 @@ body {
 #ask-input {
   width: 100%;
   box-sizing: border-box;
-  border: 2px solid #e4e0ff;
+  border: 2px solid #dbeafe;
   border-radius: 10px;
   padding: 8px 10px;
   font: inherit;
@@ -225,7 +210,205 @@ body {
   outline: none;
 }
 #ask-input:focus {
-  border-color: #7b61ff;
+  border-color: var(--accent);
+}
+
+/* Wider bubble for longer questions and the teach-back. */
+#bubble.wide {
+  width: 360px;
+}
+#say {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Answering the apprentice's questions. */
+#answer-phase {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7a99;
+  margin: 10px 0 6px;
+}
+/* What it heard you say, as you say it. */
+.heard {
+  min-height: 38px;
+  border: 2px solid #dbeafe;
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font-style: italic;
+}
+.heard:empty::before {
+  content: attr(data-placeholder);
+  color: #8a96b0;
+}
+#buddy.hearing .heard {
+  border-color: var(--accent);
+}
+.answer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.answer-actions .hint {
+  flex: 1;
+  font-size: 11px;
+  color: #8a96b0;
+}
+.answer-actions button,
+#rec button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+#answer-send {
+  background: var(--accent);
+  color: #fff;
+}
+#answer-skip {
+  background: #eef2f8;
+  color: var(--ink);
+}
+
+/* What you just said, shown briefly above the recording pill. */
+#caption {
+  position: absolute;
+  right: calc(var(--inset) + var(--orb) + 14px);
+  bottom: calc(var(--inset) + var(--orb) / 2 + 26px);
+  max-width: 320px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: rgba(18, 32, 74, 0.86);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  animation: pop 0.2s ease-out;
+}
+#rec-mic {
+  font-size: 13px;
+  opacity: 0.45;
+  transition: opacity 0.15s, transform 0.15s;
+}
+#buddy.hearing #rec-mic {
+  opacity: 1;
+  transform: scale(1.2);
+}
+/* While you talk, the orb leans in and brightens with your voice. */
+#buddy.hearing #glint {
+  transform: scale(1.4) !important;
+}
+
+/* Recording pill, to the left of the orb. */
+#rec {
+  position: absolute;
+  right: calc(var(--inset) + var(--orb) + 14px);
+  bottom: calc(var(--inset) + var(--orb) / 2 - 17px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(20, 40, 90, 0.22), 0 0 0 1px rgba(20, 40, 90, 0.06);
+  font-size: 13px;
+  white-space: nowrap;
+  animation: pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#rec-title {
+  font-weight: 600;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#rec-time {
+  color: #6b7a99;
+  font-variant-numeric: tabular-nums;
+}
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: rec-blink 1.4s ease-in-out infinite;
+}
+#rec.off .rec-dot {
+  background: #9ca3af;
+  animation: none;
+}
+#rec-off {
+  background: #eef2f8;
+  color: var(--ink);
+}
+#rec.off #rec-off {
+  background: #fde68a;
+}
+#rec-finish {
+  background: var(--accent);
+  color: #fff;
+}
+@keyframes rec-blink {
+  50% { opacity: 0.35; }
+}
+
+/* A guardrail for the current step, under what's said. */
+#guide-note {
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: #fff4e5;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.35;
+}
+#guide-note::before {
+  content: '⚠︎ ';
+}
+
+/* Walkthrough controls under the current step. */
+#guide-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+#guide-count {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7a99;
+}
+#guide-bar button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+#guide-next {
+  background: var(--accent);
+  color: #fff;
+}
+#guide-next:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+#guide-stop {
+  background: #eef2f8;
+  color: var(--ink);
+}
+#say:empty + #ask + #guide-bar {
+  margin-top: 0;
 }
 
 @keyframes pop {
@@ -233,30 +416,50 @@ body {
   to { transform: scale(1) translateY(0); opacity: 1; }
 }
 
-/* ---------- pointer + highlight ---------- */
+/* ---------- spark, pointer + highlight ---------- */
+
+#spark,
+.trail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 10;
+  background: radial-gradient(circle at 40% 40%, #ffffff 0%, var(--core) 45%, var(--accent) 100%);
+  box-shadow: 0 0 12px 3px rgba(94, 231, 255, 0.8), 0 0 30px 8px rgba(59, 130, 246, 0.45);
+}
+.trail {
+  z-index: 9;
+  box-shadow: 0 0 10px 2px rgba(94, 231, 255, 0.6);
+}
 
 #pointer {
   position: absolute;
   left: 0;
   top: 0;
-  z-index: 10;
+  z-index: 11;
   pointer-events: none;
-  filter: drop-shadow(0 2px 6px var(--accent-glow));
+  overflow: visible;
+  filter: drop-shadow(0 0 4px rgba(94, 231, 255, 0.95)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.6));
 }
 #pointer path {
-  fill: var(--accent);
+  fill: url(#pointer-fill);
   stroke: #fff;
-  stroke-width: 1.6;
+  stroke-width: 1.4;
   stroke-linejoin: round;
 }
 
 #spot {
   position: absolute;
   pointer-events: none;
-  border: 3px solid var(--accent);
+  border: 3px solid var(--core);
   border-radius: 12px;
   box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow);
-  animation: spot-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), pulse 1.2s ease-in-out 0.35s infinite;
+  animation: spot-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), ring 1.2s ease-in-out 0.35s infinite;
 }
 #spot-label {
   position: absolute;
@@ -280,7 +483,15 @@ body {
   from { transform: scale(1.6); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
-@keyframes pulse {
+@keyframes ring {
   0%, 100% { box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow); }
-  50% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0.15), 0 0 32px var(--accent-glow); }
+  50% { box-shadow: 0 0 0 10px rgba(94, 231, 255, 0.15), 0 0 32px var(--accent-glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swirl,
+  #body,
+  #plasma {
+    animation: none !important;
+  }
 }
