@@ -55,7 +55,8 @@ const state = {
   convoUntil: 0, // after an exchange, keep listening (no wake word) until this time
   canHear: false, // speech-to-text available (needs ElevenLabs)
   pointerAt: null, // where the cursor is pointing, while it's out of the orb
-  pointerStyle: 'highlight', // 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
+  pointerStyle: 'mixed', // 'mixed', 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
+  pointerMode: null, // what's out on screen now: 'ring' or 'cursor'
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
   voice: 'system',
@@ -335,17 +336,58 @@ function goHomeLater(ms = LINGER_MS) {
   }, ms);
 }
 
+// How to point this time. "mixed" (the default) keeps the playful spark for
+// the moments it means something and the calm ring for the rest:
+//   - the first point in a conversation: the spark squeezes out of the orb and
+//     lands as a ring, so you see the answer come from it
+//   - after that, while something's still pointed at: the ring glides on
+//   - Jarvis at work: always the ring, never a cursor that looks like yours
+//   - Friday's lessons: the spark cursor, hopping step to step ("follow me")
+function pointStyleNow() {
+  if (state.pointerStyle !== 'mixed') return state.pointerStyle;
+  if (state.executing) return 'highlight';
+  if (state.guiding) return 'spark';
+  return state.pointerAt ? 'highlight' : 'arrive';
+}
+
 async function pointTo(rect, label, taps = 3) {
   clearTimeout(homeTimer);
   if (homing) await homing; // already on its way back: let it land, then go out again
   const center = { x: rect.x + rect.w / 2, y: Math.max(4, rect.y + rect.h / 2) };
-  // Highlight style: a calm ring around the thing itself, gliding from one
-  // target to the next. No cursor, so it's never mistaken for your mouse.
-  if (state.pointerStyle === 'highlight') {
+  const style = pointStyleNow();
+  // A cursor out on screen when the ring takes over: put it away first.
+  if (style !== 'spark' && state.pointerMode === 'cursor') {
+    for (const el of [pointer, spark]) {
+      el.getAnimations().forEach((x) => x.cancel());
+      el.classList.add('hidden');
+    }
+  }
+  // Highlight: a calm ring around the thing itself, gliding from one target to
+  // the next. No cursor, so it's never mistaken for your mouse.
+  if (style === 'highlight') {
     if (!state.pointerAt) flare();
     spot.classList.remove('fading');
     showSpot(rect, label);
     state.pointerAt = center;
+    state.pointerMode = 'ring';
+    return;
+  }
+  // Arrive: the spark squeezes out and flies there, then blooms into the ring.
+  if (style === 'arrive') {
+    flare();
+    spot.classList.add('hidden');
+    state.exit = await squeezeOut(center);
+    await flySpark(state.exit, center);
+    await spark.animate(
+      [{ transform: `translate(${center.x}px, ${center.y}px) scale(1)`, opacity: 1 }, { transform: `translate(${center.x}px, ${center.y}px) scale(2.4)`, opacity: 0 }],
+      { duration: 220, easing: 'ease-out', fill: 'forwards' }
+    ).finished;
+    spark.classList.add('hidden');
+    spark.getAnimations().forEach((x) => x.cancel());
+    spot.classList.remove('fading');
+    showSpot(rect, label);
+    state.pointerAt = center;
+    state.pointerMode = 'ring';
     return;
   }
   if (state.pointerAt) {
@@ -360,15 +402,17 @@ async function pointTo(rect, label, taps = 3) {
   showSpot(rect, label);
   await sparkToCursor(center, taps);
   state.pointerAt = center;
+  state.pointerMode = 'cursor';
 }
 
-// Bring the cursor home and melt it back into the orb.
+// Put the pointing away: a ring fades where it is; a cursor flies home and
+// melts back into the orb.
 async function goHome() {
   clearTimeout(homeTimer);
   if (!state.pointerAt) return;
   const from = state.pointerAt;
   state.pointerAt = null;
-  if (state.pointerStyle === 'highlight') {
+  if (state.pointerMode !== 'cursor') {
     spot.classList.add('fading');
     await sleep(300);
     if (!state.pointerAt) clearPointing();
@@ -405,6 +449,7 @@ function showSpot(rect, label) {
 }
 
 function clearPointing() {
+  state.pointerMode = null;
   spot.classList.add('hidden');
   for (const el of [pointer, spark, dropEl, neckEl, ...trails]) {
     el.getAnimations().forEach((a) => a.cancel());
@@ -1437,7 +1482,7 @@ window.buddy.on('config', (c) => {
   state.micOff = Boolean(c.micOff);
   state.canHear = Boolean(c.canHear);
   state.voice = c.voice;
-  state.pointerStyle = c.pointerStyle === 'spark' ? 'spark' : 'highlight';
+  state.pointerStyle = ['spark', 'highlight'].includes(c.pointerStyle) ? c.pointerStyle : 'mixed';
   state.agents = c.agents || {};
   applyAgent(c.agent || 'friday', { show: false });
   setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });

@@ -57,9 +57,10 @@ function loadConfig(userDataDir) {
     // Languages you talk to it in (en, hi, ta…). Speech in others is someone
     // else in the room, and is ignored.
     speechLanguages: String(get('SPEECH_LANGUAGES', 'en')).split(/[\s,]+/).filter(Boolean),
-    // How it points: "highlight" (a ring around the thing) or "spark" (a cursor
-    // flies out of the orb to it).
-    pointerStyle: /^spark$/i.test(get('POINTER_STYLE', 'highlight')) ? 'spark' : 'highlight',
+    // How it points: "mixed" (the spark squeezes out for the first point and in
+    // lessons, a calm ring otherwise), "highlight" (always the ring) or "spark"
+    // (always a cursor flying out of the orb).
+    pointerStyle: ['spark', 'highlight'].find((p) => p === String(get('POINTER_STYLE', 'mixed')).toLowerCase()) || 'mixed',
     wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
     // Take a screenshot of the front window when accessibility isn't enough
     // (diagrams, pictures, apps that describe nothing). Needs Screen Recording.
