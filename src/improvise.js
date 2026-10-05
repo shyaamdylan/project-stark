@@ -68,13 +68,16 @@ Reply with status "step" and the single next action:
 - "switch_to": text names an already-open window or browser tab to bring to the front ("budget spreadsheet", "YouTube").
 - "read_file": text is a path in the home folder ("~/Documents/PianoScribe/README.md") or a description ("the PianoScribe readme"). You get its text (or a folder's list of files) next turn. Use it to learn how something works instead of reading it off the screen.
 Prefer these direct actions (open_file, read_file, open_url, open_app, switch_to) over clicking through menus whenever they do the job: they're faster and more reliable.
-You never type or press keys in a terminal app, and never run shell commands. If a task needs commands run (setting up or starting a software project), read the instructions with read_file, then finish with status "done" and say exactly which commands the user should run, and in which folder, briefly.
+- "run_command": runs one command in a visible Terminal window: text is the command, folder is the project folder ("~/Documents/pianoscribe"). The user is asked first automatically. Next turn you get its output so far and any local web addresses it printed. Use it when asked to run, start, set up or test a software project: read its README (and package.json) with read_file first, then run the command it documents, exactly as written there; one command per step. You may put an environment variable the README mentions in front ("PIANOSCRIBE_WEB_PORT=3100 ./run.sh"), e.g. when the output says a port is in use. Commands the project doesn't document, deleting, sudo and system changes are refused.
+To start a project, try its run command first; only run install or setup steps if that fails because something isn't installed (or the folder list shows it was never set up, e.g. no node_modules or .venv where the README expects one).
+After starting a web app, open_url the local address from its output, then finish with done ("PianoScribe is running at localhost:3100."). If it fails, read the error in the output and fix the cause with another documented command (a setup step first), or say in one sentence what the user must do.
+You never type or press keys in a terminal app: use run_command.
 - "wait": give a page or app a moment to load.
 
 Talk as little as possible: the user wants it done, not described.
 - say: at most 6 words on the step ("Reading the README."). It's shown on screen, not spoken.
 - summary (first reply only, otherwise ""): at most 10 words, spoken ("Opening the README, sir.").
-- With "done", say is the result the user needs, as short as it can be; for commands, just the folder and the commands ("In Documents/pianoscribe, run ./run.sh.").
+- With "done", say is the result the user needs, as short as it can be; ("PianoScribe is running at localhost:3100.").
 - With "needs_teaching" or "need_info", say is one short sentence.
 Act, don't ask: if the request names something (a project, a file), find it with read_file or open_file rather than asking where it is.`;
 }
@@ -88,11 +91,12 @@ const SCHEMA = {
     action: {
       type: 'object',
       properties: {
-        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'open_file', 'switch_to', 'read_file', 'wait', 'none'] },
+        kind: { type: 'string', enum: ['point', 'click', 'type', 'keys', 'open_url', 'open_app', 'open_file', 'switch_to', 'read_file', 'run_command', 'wait', 'none'] },
         target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
         text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        folder: { anyOf: [{ type: 'string' }, { type: 'null' }] },
       },
-      required: ['kind', 'target_id', 'text'],
+      required: ['kind', 'target_id', 'text', 'folder'],
       additionalProperties: false,
     },
   },
@@ -164,7 +168,7 @@ class Improviser {
       }
       const a = r.action || {};
       const target = Number.isInteger(a.target_id) ? this.chosen[a.target_id] || null : null;
-      return { status: r.status, say: r.say || '', summary: r.summary || '', kind: a.kind || 'none', target, text: a.text == null ? null : String(a.text) };
+      return { status: r.status, say: r.say || '', summary: r.summary || '', kind: a.kind || 'none', target, text: a.text == null ? null : String(a.text), folder: a.folder == null ? null : String(a.folder) };
     } finally {
       this.inFlight = false;
     }

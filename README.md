@@ -158,6 +158,14 @@ It searches every app window you can see on screen, including web pages in Safar
 and other Chromium browsers, plus the frontmost app's menu bar. Anything hidden behind
 another window is skipped, and when two matches are equally good the one nearer the front wins.
 
+### Start a software project
+
+"Jarvis, get PianoScribe running": he reads the project's README, then runs its own start command
+in a Terminal window you can see ("I'll run ./run.sh in Documents/pianoscribe. Go ahead, sir?"),
+and opens the local address it prints. He only runs commands the project itself documents (its
+README, package.json scripts or Makefile targets), each needs your yes, and anything that deletes,
+needs sudo, runs a script from the internet or changes the system is refused.
+
 ### Try requests by typing (no voice, no mic)
 
 Test what Jarvis does without speaking, and without spending ElevenLabs credits.

@@ -22,6 +22,7 @@ const windows = require('./src/windows');
 const { correctNames, knownNames } = require('./src/names');
 const act = require('./src/act');
 const textMode = require('./src/textmode');
+const runProject = require('./src/runproject');
 const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
@@ -648,6 +649,40 @@ const hands = {
     if (!best || best.score < 0.6) return null;
     await windows.bringToFront(best.item);
     return windows.describe(best.item);
+  },
+  // A command already checked and agreed (src/jarvis.js, src/runproject.js):
+  // run in a visible Terminal window, its output copied to a log he reads back.
+  runCommand: async ({ dir, command }) => {
+    const logDir = path.join(app.getPath('userData'), 'jarvis-runs');
+    fs.mkdirSync(logDir, { recursive: true });
+    const log = path.join(logDir, `command-${Date.now()}.log`);
+    fs.writeFileSync(log, '');
+    if (textMode.dryRun()) {
+      console.log(`[dry] run in ${dir}: ${command}`);
+      return { ok: true, finished: false, output: '(dry run: not actually run)', urls: [] };
+    }
+    const script = log.replace(/\.log$/, '.command');
+    fs.writeFileSync(script, runProject.commandFile(dir, command, log), { mode: 0o700 });
+    const err = await new Promise((resolve) => execFile('/usr/bin/open', ['-a', 'Terminal', script], (e) => resolve(e ? e.message : '')));
+    if (err) return { ok: false, why: `Terminal wouldn't open (${err.split('\n')[0]})` };
+    console.log(`[jarvis] running in ${dir}: ${command}`);
+    // Wait for it to print an address, finish, or go quiet for a while.
+    const started = Date.now();
+    let output = '';
+    let changedAt = started;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const now = fs.readFileSync(log, 'utf8');
+      if (now !== output) {
+        output = now;
+        changedAt = Date.now();
+      }
+      if (runProject.findUrls(output).length && Date.now() - changedAt > 1500) break;
+      if (Date.now() - changedAt > 8000 && output) break;
+      if (Date.now() - started > 60000) break;
+    }
+    const finished = /(\$ ?|% ?)$/.test(output) || false;
+    return { ok: true, finished, output: output.slice(-3000), urls: runProject.findUrls(output) };
   },
   // Only apps installed in the Applications folders.
   openApp: async (name) => {

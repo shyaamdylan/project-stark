@@ -711,7 +711,8 @@ const { cleanUrl } = require('./apprentice');
 // on the Mac. Commands a task needs are given to the user to run themselves.
 const TERMINALS = /^(Terminal|iTerm2?|Warp|Alacritty|kitty|WezTerm|Ghostty|Hyper)$/i;
 const inTerminal = (scan) => TERMINALS.test((scan && scan.app) || '');
-const NO_TERMINAL = "Refused: I don't type or press keys in a terminal. If the task needs commands, finish by telling the user exactly which to run (status done, with the commands in say).";
+const NO_TERMINAL = "Refused: I don't type or press keys in a terminal. Use a run_command step instead.";
+const { commandVerdict } = require('./runproject');
 
 class JarvisFreestyle extends JarvisRun {
   // deps as JarvisRun, minus skill/actions/plan, plus:
@@ -874,6 +875,28 @@ class JarvisFreestyle extends JarvisRun {
         this.record({ kind: 'read', detail: got.ok ? got.path : `couldn't read "${r.text}" (${got.why})` });
         if (!got.ok) throw new Error(got.why === 'secret' ? `"${r.text}" looks like it holds secrets, so I won't read it` : `couldn't read "${r.text}" (${got.why})`);
         return `${got.folder ? 'Folder' : 'File'} ${got.path}${got.folder ? ' contains' : ' says'}:\n${got.text}`;
+      }
+      case 'run_command': {
+        // Only a command the project documents, in that project's folder, after a yes (src/runproject.js).
+        const command = String(r.text || '').trim();
+        const folder = String(r.folder || '').trim();
+        const v = commandVerdict(command, folder);
+        if (!v.ok) {
+          this.record({ kind: 'refused', detail: `run in ${folder}`, value: `${command} (${v.why})` });
+          return `Refused to run "${command}" in ${folder}: ${v.why}.`;
+        }
+        if (!this.act.runCommand) throw new Error("I can't run commands here");
+        const where = folder.replace(/^~\//, '');
+        if (!(await this.confirm(this.s(`I'll run "${command}" in ${where}. Go ahead{sir}?`)))) {
+          return 'The user said no to running that. Finish (status done) with the command for them to run themselves, in one sentence.';
+        }
+        let got = null;
+        await this.doAct(async () => {
+          got = await this.act.runCommand({ dir: v.dir, command });
+        });
+        this.record({ kind: 'run', detail: `${v.dir}: ${command}`, value: got && got.output ? got.output.slice(-400) : '' });
+        if (!got || !got.ok) throw new Error(got && got.why ? got.why : `couldn't run "${command}"`);
+        return `Ran "${command}" in ${v.dir}, in a Terminal window (${got.finished ? 'it has finished' : 'still running'}).${got.urls.length ? ` Web addresses in its output: ${got.urls.join(', ')}.` : ''} Output so far:\n${got.output || '(nothing yet)'}`;
       }
       case 'wait':
         await this.wait(2000);
