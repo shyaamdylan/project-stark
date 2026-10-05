@@ -70,9 +70,11 @@ function loadConfig(userDataDir) {
     screenMode: /^smart$/i.test(get('SCREEN_MODE', 'always')) ? 'smart' : 'always',
     // What a screenshot covers: "screen" (the whole display the front window is
     // on, so windows behind it and side by side count) or "window" (front only).
-    // Where the orb lives: "corner" (bottom right), "auto" (in the notch on a
-    // MacBook that has one, else the corner) or "notch" (top centre, everywhere).
-    orbPlace: ['notch', 'auto'].find((p) => p === String(get('ORB_PLACE', 'corner')).toLowerCase()) || 'corner',
+    // Where the orb lives: "corner" (a black island flush in the bottom-right
+    // corner that grows while active), "float" (the orb floating just inside
+    // the corner), "notch" (top centre) or "auto" (the notch when the screen
+    // has one, else the corner).
+    orbPlace: ['notch', 'auto', 'float'].find((p) => p === String(get('ORB_PLACE', 'corner')).toLowerCase()) || 'corner',
     screenArea: /^window$/i.test(get('SCREEN_AREA', 'screen')) ? 'window' : 'screen',
     // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
     jarvis: {

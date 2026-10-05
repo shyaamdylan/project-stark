@@ -1,5 +1,8 @@
-// Where the orb lives: tucked into the MacBook's notch (like a Dynamic Island),
-// or in the bottom-right corner on screens without one.
+// Where the orb lives:
+//   island  a black shape flush in the screen's bottom-right corner, blending
+//           into the frame, that grows to hold everything while it's active
+//   notch   tucked into the MacBook's notch (like a Dynamic Island)
+//   float   the orb floating just inside the bottom-right corner
 //
 // macOS knows where the notch is (NSScreen's safe area and the menu bar areas
 // either side of it); Electron doesn't, so we ask once through JXA.
@@ -34,18 +37,22 @@ function findNotches() {
 }
 
 // How the overlay covers a display, and where the orb sits on it.
-//   place  'notch' (always at the top centre, a notch drawn where there's none),
-//          'corner', or 'auto' (the notch when this display has one)
+//   place  'corner' (the island), 'float', 'notch' (always at the top centre, a
+//          notch drawn where there's none), or 'auto' (the notch when this
+//          display has one, else the island)
 // Returns { mode, area (screen rect for the window), notch ({ x, w, h } in the window) }.
-function overlayLayout(display, notches = [], place = 'auto') {
+function overlayLayout(display, notches = [], place = 'corner') {
   const b = display.bounds;
   const wa = display.workArea || b;
+  const whole = { x: b.x, y: b.y, width: b.width, height: b.height };
   const n = notches.find((x) => Math.abs(x.x - b.x) < 2 && Math.abs(x.w - b.width) < 2);
   const useNotch = place === 'notch' || (place === 'auto' && Boolean(n));
-  if (!useNotch) return { mode: 'corner', area: { x: wa.x, y: wa.y, width: wa.width, height: wa.height }, notch: null };
+  if (place === 'float') return { mode: 'corner', area: { x: wa.x, y: wa.y, width: wa.width, height: wa.height }, notch: null };
+  // The island sits flush in the screen's corner, so the overlay covers it all.
+  if (!useNotch) return { mode: 'island', area: whole, notch: null };
   const menuBar = Math.max(24, wa.y - b.y);
   const notch = n ? { x: n.left - n.x, w: n.right - n.left, h: n.h } : { x: (b.width - 180) / 2, w: 180, h: menuBar };
-  return { mode: 'notch', area: { x: b.x, y: b.y, width: b.width, height: b.height }, notch };
+  return { mode: 'notch', area: whole, notch };
 }
 
 module.exports = { findNotches, overlayLayout };

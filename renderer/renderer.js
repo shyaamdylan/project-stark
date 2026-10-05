@@ -1415,6 +1415,32 @@ document.addEventListener('mousemove', (e) => {
   }
 });
 
+// ---------- the corner island ----------
+//
+// In the island layout everything (status, speech, questions, Jarvis's task
+// panel) sits in one black shape in the screen's corner. It's sized to what's
+// in it, and the size is set explicitly so it animates as it grows and shrinks.
+const shell = $('shell');
+const shellIn = $('shell-in');
+
+function fitShell() {
+  if (!document.body.classList.contains('island')) {
+    shell.classList.remove('open');
+    shell.style.width = shell.style.height = '';
+    return;
+  }
+  // Open while awake, or while anything in it is showing (a greeting, a question).
+  const showing = [...shellIn.children].some((el) => el.id !== 'island-bar' && !el.classList.contains('hidden'));
+  const open = buddyEl.classList.contains('awake') || showing;
+  shell.classList.toggle('open', open);
+  // Closed, it's a small nub around the resting orb (sized in CSS).
+  shell.style.width = open ? `${shellIn.offsetWidth}px` : '';
+  shell.style.height = open ? `${shellIn.offsetHeight}px` : '';
+}
+new ResizeObserver(fitShell).observe(shellIn);
+// Things appearing or hiding (and waking or resting) change what it holds.
+new MutationObserver(fitShell).observe(buddyEl, { attributes: true, attributeFilter: ['class'], subtree: true });
+
 // ---------- wiring ----------
 
 // Where the orb lives: in the notch (mode 'notch', with its place in the window)
@@ -1422,6 +1448,8 @@ document.addEventListener('mousemove', (e) => {
 window.buddy.on('layout', (l) => {
   const inNotch = l && l.mode === 'notch' && l.notch;
   document.body.classList.toggle('notch', Boolean(inNotch));
+  document.body.classList.toggle('island', Boolean(l && l.mode === 'island'));
+  fitShell();
   for (const k of ['x', 'w', 'h']) {
     if (inNotch) document.body.style.setProperty(`--notch-${k}`, `${l.notch[k]}px`);
     else document.body.style.removeProperty(`--notch-${k}`);

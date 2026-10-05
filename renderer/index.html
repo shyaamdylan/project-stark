@@ -33,60 +33,70 @@
     </svg>
 
     <div id="buddy">
-      <div id="bubble" class="hit hidden">
-        <div id="say"></div>
-        <form id="ask" class="hidden" autocomplete="off">
-          <input id="ask-input" type="text" placeholder="What should I find? e.g. “share”" spellcheck="false" />
-        </form>
-        <form id="answer" class="hidden" autocomplete="off">
-          <div id="answer-phase"></div>
-          <div id="answer-input" class="heard" contenteditable="plaintext-only" role="textbox" aria-label="Your answer" data-placeholder="Listening… answer out loud, or click to type"></div>
-          <div class="answer-actions">
-            <span class="hint" id="answer-hint">Say it, or type and press Enter</span>
-            <button id="answer-skip" type="button">Skip</button>
-            <button id="answer-send" type="submit">Send</button>
+      <!-- The corner island: a black shape in the screen's bottom-right corner that
+           grows to hold everything below while it's active. In the other layouts
+           both wrappers are display: contents, so their children sit as before. -->
+      <div id="shell">
+        <div id="shell-in">
+          <div id="bubble" class="hit hidden">
+            <div id="say"></div>
+            <form id="ask" class="hidden" autocomplete="off">
+              <input id="ask-input" type="text" placeholder="What should I find? e.g. “share”" spellcheck="false" />
+            </form>
+            <form id="answer" class="hidden" autocomplete="off">
+              <div id="answer-phase"></div>
+              <div id="answer-input" class="heard" contenteditable="plaintext-only" role="textbox" aria-label="Your answer" data-placeholder="Listening… answer out loud, or click to type"></div>
+              <div class="answer-actions">
+                <span class="hint" id="answer-hint">Say it, or type and press Enter</span>
+                <button id="answer-skip" type="button">Skip</button>
+                <button id="answer-send" type="submit">Send</button>
+              </div>
+            </form>
+            <div id="guide-note" class="hidden"></div>
+            <div id="guide-bar" class="hidden">
+              <span id="guide-count"></span>
+              <button id="guide-next" type="button">Next</button>
+              <button id="guide-stop" type="button">Stop</button>
+            </div>
+            <!-- During a lesson: ask anything by typing (or just say it). -->
+            <form id="guide-ask-form" class="hidden" autocomplete="off">
+              <input id="guide-ask" type="text" placeholder="Ask anything, or just say it…" spellcheck="false" />
+            </form>
           </div>
-        </form>
-        <div id="guide-note" class="hidden"></div>
-        <div id="guide-bar" class="hidden">
-          <span id="guide-count"></span>
-          <button id="guide-next" type="button">Next</button>
-          <button id="guide-stop" type="button">Stop</button>
+
+          <div id="caption" class="hidden"></div>
+
+          <div id="rec" class="hit hidden">
+            <span class="rec-dot"></span>
+            <span id="rec-title"></span>
+            <span id="rec-time">00:00</span>
+            <span id="rec-mic" title="Listening">🎙</span>
+            <button id="rec-off" type="button" title="Pause recording">Off the record</button>
+            <button id="rec-finish" type="button">Finish</button>
+          </div>
+
+          <!-- While Jarvis works: what he's doing, how far along, and Stop. -->
+          <div id="activity" class="hit hidden" role="status" aria-live="polite">
+            <div class="act-head">
+              <span class="act-dot"></span>
+              <span id="act-title"></span>
+              <span id="act-count"></span>
+              <button id="act-stop" type="button" title="Stop">Stop</button>
+            </div>
+            <div id="act-step"></div>
+            <div class="act-bar"><div id="act-fill"></div></div>
+          </div>
+
+          <!-- Who you're talking to, shown for a moment when it changes -->
+          <div id="agent-tag" class="hidden"></div>
+
+          <div id="island-bar">
+            <!-- What she's doing right now: Listening, Thinking, Speaking, Working. Hidden when dormant. -->
+            <div id="status" class="hidden"></div>
+            <span id="orb-slot"></span>
+          </div>
         </div>
-        <!-- During a lesson: ask anything by typing (or just say it). -->
-        <form id="guide-ask-form" class="hidden" autocomplete="off">
-          <input id="guide-ask" type="text" placeholder="Ask anything, or just say it…" spellcheck="false" />
-        </form>
       </div>
-
-      <div id="caption" class="hidden"></div>
-
-      <div id="rec" class="hit hidden">
-        <span class="rec-dot"></span>
-        <span id="rec-title"></span>
-        <span id="rec-time">00:00</span>
-        <span id="rec-mic" title="Listening">🎙</span>
-        <button id="rec-off" type="button" title="Pause recording">Off the record</button>
-        <button id="rec-finish" type="button">Finish</button>
-      </div>
-
-      <!-- While Jarvis works: what he's doing, how far along, and Stop. -->
-      <div id="activity" class="hit hidden" role="status" aria-live="polite">
-        <div class="act-head">
-          <span class="act-dot"></span>
-          <span id="act-title"></span>
-          <span id="act-count"></span>
-          <button id="act-stop" type="button" title="Stop">Stop</button>
-        </div>
-        <div id="act-step"></div>
-        <div class="act-bar"><div id="act-fill"></div></div>
-      </div>
-
-      <!-- Who you're talking to, shown for a moment when it changes -->
-      <div id="agent-tag" class="hidden"></div>
-
-      <!-- What she's doing right now: Listening, Thinking, Speaking, Working. Hidden when dormant. -->
-      <div id="status" class="hidden"></div>
 
       <!-- In the notch: a black island that grows out of it, the orb in its right side. -->
       <div id="island"></div>

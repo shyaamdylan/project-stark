@@ -168,13 +168,21 @@ It needs **Screen Recording** permission; without it they say so and go by Acces
 Each look adds a second or two and a little cost. `SCREEN_MODE=smart` goes back to looking only
 when Accessibility isn't enough; `VISION_ENABLED=0` (or the 👀 menu) turns screenshots off.
 
+### In the corner
+
+The orb lives in a black island flush in the screen's bottom-right corner, so it reads as part of
+the MacBook's frame. Resting, it's a small nub with a dim orb. When Friday or Jarvis is active it
+grows up and to the left to hold everything: what they're doing (Listening, Thinking, Speaking),
+what they say, their questions and Jarvis's task panel. When they're done it shrinks back.
+`ORB_PLACE=float` brings back the orb floating just inside the corner.
+
 ### In the notch
 
-With `ORB_PLACE=auto` in `.env`, on a MacBook with a notch the orb lives in it: a black island grows just out of the notch with
+With `ORB_PLACE=auto` (or `notch`) in `.env`, on a MacBook with a notch the orb lives in it: a black island grows just out of the notch with
 the orb peeking out on its right. When Friday or Jarvis is awake the island widens and says what
 they're doing (Listening, Thinking, Speaking), and speech drops down underneath. Pointing still
-flies out from there. Screens without a notch keep the bottom-right corner. `ORB_PLACE=notch`
-puts it at the top centre on every screen. The default, `ORB_PLACE=corner`, keeps the corner.
+flies out from there. With `auto`, screens without a notch keep the corner island; `ORB_PLACE=notch` puts it at the
+top centre on every screen.
 
 ### Calm by design
 

@@ -901,6 +901,160 @@ body.notch #activity {
   left: calc(var(--notch-c) - 145px);
 }
 
+/* ---------- the corner island (ORB_PLACE=corner, the default) ----------
+   A black shape flush in the screen's bottom-right corner, so it reads as part
+   of the frame. Resting, it's a small nub around a dim orb. Active, it grows
+   (up and to the left) to hold what it's doing, what it's saying, questions
+   and Jarvis's task panel; renderer.js sizes it to fit so the growth animates.
+   Elsewhere the wrappers vanish (display: contents) and nothing changes. */
+#shell,
+#shell-in,
+#island-bar {
+  display: contents;
+}
+#orb-slot {
+  display: none;
+}
+body.island {
+  --orb: 24px;
+  --nub: calc(var(--orb) + 22px);
+}
+body.island #buddy.dormant {
+  --orb: 12px;
+}
+body.island #shell {
+  display: block;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: var(--nub);
+  height: var(--nub);
+  background: #000;
+  border-top-left-radius: 16px;
+  overflow: hidden;
+  transition: width 0.45s cubic-bezier(0.32, 0.72, 0, 1), height 0.45s cubic-bezier(0.32, 0.72, 0, 1), border-radius 0.45s ease;
+}
+body.island #shell.open {
+  border-top-left-radius: 24px;
+}
+body.island #shell-in {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: max-content;
+  max-width: 400px;
+  box-sizing: border-box;
+  padding: 16px 0 0 18px;
+  color: var(--ink);
+  /* Always dark: it's part of the frame. */
+  --ink: #f5f5f7;
+  --card-muted: #a1a1a6;
+  --card-fill: rgba(255, 255, 255, 0.1);
+  --card-line: rgba(255, 255, 255, 0.16);
+  opacity: 1;
+  transition: opacity 0.25s ease 0.15s;
+}
+body.island #shell:not(.open) #shell-in {
+  opacity: 0;
+  transition-delay: 0s;
+}
+body.island #shell-in > *:not(#island-bar) {
+  position: static;
+  inset: auto;
+  transform: none;
+  margin: 0 18px 0 0;
+  box-shadow: none;
+  animation: island-in 0.3s ease both;
+}
+@keyframes island-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+body.island #bubble {
+  width: 300px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+body.island #bubble.wide {
+  width: 360px;
+}
+body.island #bubble::after {
+  display: none;
+}
+body.island #ask-input,
+body.island #guide-ask,
+body.island #answer-input {
+  background: var(--card-fill);
+  border-color: var(--card-line);
+  color: var(--ink);
+}
+body.island #caption {
+  max-width: 300px;
+  padding: 0;
+  background: transparent;
+  color: var(--card-muted);
+}
+body.island #rec {
+  align-self: flex-start;
+  background: var(--card-fill);
+  color: var(--ink);
+}
+body.island #activity {
+  width: 300px;
+  background: var(--card-fill);
+}
+body.island #agent-tag {
+  height: auto;
+  padding: 0;
+  line-height: 1.2;
+  background: transparent;
+  font-size: 11px;
+}
+body.island #shell.open #island-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 140px;
+  height: var(--nub);
+  padding-right: 11px;
+}
+body.island #status {
+  position: static;
+  transform: none;
+  margin-right: auto;
+  padding: 0;
+  background: transparent;
+  font-size: 12px;
+}
+body.island #orb-slot {
+  display: block;
+  flex: none;
+  width: var(--orb);
+}
+body.island #orb {
+  right: 11px;
+  bottom: 11px;
+  z-index: 2;
+  transition: width 0.35s ease, height 0.35s ease, filter 0.6s ease;
+}
+body.island #reactor {
+  inset: -5px;
+}
+body.island #glint {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+}
+body.island #buddy.dormant #goo-glow,
+body.island #buddy.dormant #plasma {
+  opacity: 0.55;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .swirl,
   #body,
