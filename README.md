@@ -148,6 +148,22 @@ open, any text you've selected, or the field you're in.
 - **Vague requests pick the skill that fits where you are**, so "how do I export this?" in one app
   goes to the skill for that app.
 
+### Looking at pictures, only when needed
+
+Reading the screen through accessibility is exact and private, but blind to pictures: diagrams,
+photos, charts, design canvases, games. So Friday and Jarvis take **one screenshot of the front
+window** (with the orb hidden) only when one of these says it's needed:
+
+- the question is visual ("where's the database in this diagram?", "which is the red one?")
+- the app describes almost nothing, or a big picture or canvas fills the window
+- accessibility came up empty for what you asked about
+- you're following up on something they just looked at, in the same window
+
+Claude reads the screenshot, answers, and they point at the part they mean. Screenshots are only
+used to answer and point, never to click (their positions are estimates). It needs **Screen
+Recording** permission; without it they say so and go by what apps describe. The terminal and
+the session log note every look and why. Turn it off from the 👀 menu or with `VISION_ENABLED=0`.
+
 ### Awake or dormant
 
 The orb shows whether it's listening to you. **Dormant**: dimmer and calm, only listening for

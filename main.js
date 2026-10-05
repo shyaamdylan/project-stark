@@ -23,6 +23,7 @@ const windows = require('./src/windows');
 const { correctNames, knownNames } = require('./src/names');
 const sessionLog = require('./src/sessionlog');
 const { answerAboutScreen, isScreenQuestion } = require('./src/screenqa');
+const { needsVision, lookAtScreen, boxToScreen } = require('./src/vision');
 const { screenContext } = require('./src/observe');
 const act = require('./src/act');
 const textMode = require('./src/textmode');
@@ -279,6 +280,11 @@ async function ask(text) {
 
   stopGuide();
   const canGuide = Guide.available(cfg);
+  // A picture, a diagram, an app that describes nothing: look before answering.
+  if (canGuide && !looksLikeTask(text)) {
+    const res = await lookIfNeeded(text, scan, 'friday');
+    if (res) return res;
+  }
   // "What does this do?": a question about what's in front of them, answered from the screen.
   if (canGuide && isScreenQuestion(text)) {
     const res = await screenAnswer(text, scan, 'friday');
@@ -302,7 +308,15 @@ async function ask(text) {
     const hint = result.suggestions.length ? ` Did you mean ${result.suggestions.map((s) => `"${s}"`).join(' or ')}?` : '';
     const notFound = { ok: false, reason: 'not-found', say: `I can't see "${what}".${hint}` };
     // Not a button we can see: it might be the name of a skill it has learned.
-    if (canGuide && learnedSkills().length) return startGuide(text, scan, notFound);
+    if (canGuide && learnedSkills().length) {
+      const res = await startGuide(text, scan, notFound);
+      if (res !== notFound) return res;
+    }
+    // Or something accessibility doesn't describe (a part of a picture): look.
+    if (canGuide && LOOKABLE.test(text)) {
+      const res = await lookIfNeeded(text, scan, 'friday', { missed: true });
+      if (res) return res;
+    }
     return notFound;
   }
 
@@ -338,11 +352,108 @@ async function screenAnswer(text, scan, who) {
     console.error('[screen question]', err.message);
     return null;
   }
-  console.log(`[screen question] "${text}" → ${r.kind}${r.target ? ` (pointing at "${r.target.label}")` : ''}`);
+  console.log(`[screen question] "${text}" → ${r.kind}${r.target ? ` (pointing at "${r.target.label}")` : ''}${r.needsPicture ? ' (needs a picture)' : ''}`);
+  if (r.needsPicture) {
+    const seen = await visualAnswer(text, scan, who, "the text description wasn't enough to answer");
+    if (seen) return seen;
+  }
   if (r.kind !== 'answer' || !r.say) return null;
   if (r.target && !r.target.hidden) return { ok: true, label: r.target.label, role: ROLE_NAMES[r.target.role] || 'thing', rect: toLocal(r.target), say: r.say };
   return { ok: true, sayOnly: true, say: r.say };
 }
+
+// ---------- looking at the screen (only when needed) ----------
+//
+// Accessibility first: it's exact and private. A screenshot of the front window
+// only when needsVision() says so (a visual question, an app that describes
+// nothing, a big picture or canvas, accessibility coming up empty, or a
+// follow-up about something just seen). Used to answer and point, never to click.
+
+let lastLook = null; // { key, at }: what was looked at, for follow-ups
+let visionPermissionToldAt = 0;
+let visionOn = null;
+const visionAllowed = () => (visionOn === null ? cfg.visionEnabled : visionOn) && Guide.available(cfg);
+
+// One JPEG of the front window, with the orb and its bubble hidden.
+async function captureFront(scan) {
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') return { denied: true };
+  const frame = scan && scan.frame;
+  if (!frame || !frame.w || !frame.h) return null;
+  const display = screen.getDisplayMatching({ x: Math.round(frame.x), y: Math.round(frame.y), width: Math.round(frame.w), height: Math.round(frame.h) });
+  const sf = display.scaleFactor || 1;
+  if (win) win.setOpacity(0);
+  try {
+    await new Promise((r) => setTimeout(r, 80)); // let the overlay disappear first
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.bounds.width * sf), height: Math.round(display.bounds.height * sf) } });
+    const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
+    if (!src || src.thumbnail.isEmpty()) return null;
+    const img = src.thumbnail;
+    const k = img.getSize().width / display.bounds.width;
+    const rect = {
+      x: Math.max(0, Math.round((frame.x - display.bounds.x) * k)),
+      y: Math.max(0, Math.round((frame.y - display.bounds.y) * k)),
+      width: Math.round(frame.w * k),
+      height: Math.round(frame.h * k),
+    };
+    rect.width = Math.min(rect.width, img.getSize().width - rect.x);
+    rect.height = Math.min(rect.height, img.getSize().height - rect.y);
+    let shot = img.crop(rect);
+    // Claude reads images up to about 1568 px on the long side; bigger only costs more.
+    const long = Math.max(rect.width, rect.height);
+    if (long > 1568) shot = shot.resize(rect.width >= rect.height ? { width: 1568 } : { height: 1568 });
+    const size = shot.getSize();
+    return { data: shot.toJPEG(80).toString('base64'), width: size.width, height: size.height, frame };
+  } finally {
+    if (win) win.setOpacity(1);
+  }
+}
+
+// Look, answer and point. Returns a reply, or null to carry on without it.
+async function visualAnswer(text, scan, who, why) {
+  if (!visionAllowed() || !scan || scan.error) return null;
+  const p = persona(who, cfg);
+  let image;
+  try {
+    image = await captureFront(scan);
+  } catch (err) {
+    console.error('[vision] capture', err.message);
+    return null;
+  }
+  if (image && image.denied) {
+    console.log(`[vision] wanted to look (${why}) but Screen Recording isn't allowed`);
+    if (Date.now() - visionPermissionToldAt > 10 * 60 * 1000) {
+      visionPermissionToldAt = Date.now();
+      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      if (win) win.webContents.send('say', { text: p.s("To see pictures and diagrams I'd need Screen Recording permission{sir}. I've opened the setting; until then I'll go by what apps describe."), mood: 'worried' });
+    }
+    return null;
+  }
+  if (!image) return null;
+  console.log(`[vision] looking at ${scan.app}${scan.window ? ` — "${scan.window}"` : ''} (${image.width}×${image.height}) because ${why}`);
+  let r;
+  try {
+    r = await lookAtScreen(cfg.anthropicApiKey, { question: text, image, scan, agent: who, address: cfg.jarvis.address });
+  } catch (err) {
+    console.error('[vision]', err.message);
+    return null;
+  }
+  lastLook = { key: `${scan.app}|${scan.window || ''}`, at: Date.now() };
+  console.log(`[vision] → ${r.kind}${r.point ? ` (pointing at "${r.point.label}")` : ''}`);
+  if (r.kind !== 'answer' || !r.say) return null;
+  const rect = boxToScreen(r.point, image, image.frame);
+  if (rect) return { ok: true, label: rect.label, role: 'part', rect: toLocal(rect), say: r.say, looked: true };
+  return { ok: true, sayOnly: true, say: r.say, looked: true };
+}
+
+// Look first if the request, the app or the conversation says text won't be enough.
+async function lookIfNeeded(text, scan, who, { missed = false } = {}) {
+  if (!visionAllowed()) return null;
+  const d = needsVision({ text, scan, recent: lastLook, missed });
+  return d.need ? visualAnswer(text, scan, who, d.why) : null;
+}
+
+// Worth a look when accessibility found nothing: questions and "where/show me" requests, not chit-chat.
+const LOOKABLE = /(where|which|what|point|show|find|see|look|this|that|these|those)/i;
 
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
@@ -923,10 +1034,15 @@ async function askJarvis(raw) {
   // The skill lookup (Claude) and the screen scan don't depend on each other: do both at once.
   const looking = scanForAsk();
   // "What does this do?": answered from what's on screen.
-  if (Guide.available(cfg) && isScreenQuestion(text)) {
+  if (Guide.available(cfg) && !moreToDo) {
     const { scan: seen } = await looking;
-    const res = seen ? await screenAnswer(text, seen, 'jarvis') : null;
-    if (res) return res;
+    // A picture, a diagram, an app that describes nothing: look before answering.
+    const looked = seen ? await lookIfNeeded(text, seen, 'jarvis') : null;
+    if (looked) return looked;
+    if (isScreenQuestion(text)) {
+      const res = seen ? await screenAnswer(text, seen, 'jarvis') : null;
+      if (res) return res;
+    }
   }
   let relatedSkill = null;
   if (Guide.available(cfg)) {
@@ -959,6 +1075,12 @@ async function askJarvis(raw) {
   if (result.match && !result.match.hidden && result.score >= 0.9 && text.split(/\s+/).length <= 4) {
     const m = result.match;
     return { ok: true, label: m.label, role: ROLE_NAMES[m.role] || 'thing', app: m.app || scan.app, rect: toLocal(m), say: p.s(`The ${m.label} ${ROLE_NAMES[m.role] || ''} is just there{sir}.`).replace(/ {2,}/g, ' ') };
+  }
+
+  // "Where's the database in this diagram?": not something accessibility describes. Look.
+  if (Guide.available(cfg) && !moreToDo && LOOKABLE.test(text) && !(result.match && result.score >= 0.9)) {
+    const looked = await lookIfNeeded(text, scan, 'jarvis', { missed: true });
+    if (looked) return looked;
   }
 
   // Not taught: he has a go, and says honestly if he can't do it properly.
@@ -1597,6 +1719,16 @@ function buildTrayMenu() {
         click: (item) => setWake(item.checked),
       },
       { label: 'Open Skills Hub', click: () => openHub() },
+      {
+        label: 'Look at the screen when needed (diagrams, pictures)',
+        type: 'checkbox',
+        checked: Boolean(visionAllowed()),
+        enabled: Guide.available(cfg),
+        click: (item) => {
+          visionOn = item.checked;
+          console.log(`[vision] ${item.checked ? 'on' : 'off'}`);
+        },
+      },
       { label: 'What can you see? (debug)', click: () => dumpScan() },
       { label: "Open this session's log", click: () => sessionLog.sessionLogPath() && shell.openPath(sessionLog.sessionLogPath()) },
       { label: 'Show all logs in Finder', click: () => shell.openPath(path.join(app.getPath('userData'), 'logs')) },

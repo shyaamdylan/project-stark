@@ -30,8 +30,9 @@ const SCHEMA = {
     kind: { type: 'string', enum: ['answer', 'task'] },
     say: { type: 'string' },
     target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+    needs_picture: { type: 'boolean' },
   },
-  required: ['kind', 'say', 'target_id'],
+  required: ['kind', 'say', 'target_id', 'needs_picture'],
   additionalProperties: false,
 };
 
@@ -43,7 +44,8 @@ Someone asked you something while using their Mac. When it's vague ("this", "it"
 You get that context and a numbered list of what's visible (from macOS accessibility, as text; no image), each line "id | role | "label" | app | x,y".
 
 - kind "answer": answer it in one to three short spoken sentences (no markdown, ids or coordinates). If you're talking about something specific on screen (a button, a field, an error message), point at it with target_id. If the screen doesn't hold enough to answer, say what you can see and what you can't, briefly.
-- kind "task": they actually want something done or shown step by step ("can you send this", "help me fill this in"), not explained. say "" and target_id null; another part of the assistant will handle it.`;
+- kind "task": they actually want something done or shown step by step ("can you send this", "help me fill this in"), not explained. say "" and target_id null; another part of the assistant will handle it.
+- needs_picture: true when answering properly needs seeing it (a diagram, picture, chart, colours, layout, or content the list doesn't describe); the assistant will then look at a screenshot instead. Otherwise false.`;
 }
 
 const VOICES = {
@@ -64,12 +66,12 @@ async function answerAboutScreen(apiKey, { question, scan, agent = 'friday', add
     system: system(voice),
     messages: [{ role: 'user', content: `They asked: "${question}"\n\nWhat's in front of them: ${screenContext(scan)}\n\nOn screen:\n${screen.text || '(nothing readable)'}` }],
   });
-  if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', target: null };
+  if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', target: null, needsPicture: false };
   try {
     const r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-    return { kind: r.kind === 'answer' ? 'answer' : 'task', say: r.say || '', target: Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null };
+    return { kind: r.kind === 'answer' ? 'answer' : 'task', say: r.say || '', target: Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null, needsPicture: Boolean(r.needs_picture) };
   } catch {
-    return { kind: 'task', say: '', target: null };
+    return { kind: 'task', say: '', target: null, needsPicture: false };
   }
 }
 

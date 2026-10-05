@@ -55,6 +55,9 @@ function loadConfig(userDataDir) {
     // Say this to wake the buddy ("Hey Friday, how do I…"). Needs ELEVENLABS_API_KEY.
     wakeWord: get('WAKE_WORD', 'friday'),
     wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
+    // Take a screenshot of the front window when accessibility isn't enough
+    // (diagrams, pictures, apps that describe nothing). Needs Screen Recording.
+    visionEnabled: get('VISION_ENABLED', '1') !== '0',
     // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
     jarvis: {
       // ElevenLabs "George": a warm, mature British voice.

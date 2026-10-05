@@ -30,7 +30,7 @@ function fake(reply) {
 }
 
 test('a vague question is answered from the screen, pointing at what it is about', async () => {
-  const client = fake({ kind: 'answer', say: 'Sync copies your changes to the cloud.', target_id: 0 });
+  const client = fake({ kind: "answer", say: "Sync copies your changes to the cloud.", target_id: 0, needs_picture: false });
   const scan = { app: 'Acme', window: 'Notes', selection: '', elements: [el('AXButton', 'Sync')] };
   const r = await answerAboutScreen('k', { question: 'what does this do?', scan, client });
   assert.equal(r.kind, 'answer');

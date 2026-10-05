@@ -61,5 +61,8 @@ end, and say so when you do: it acts on the real screen.
   with the user's yes, in a visible Terminal window. Deleting, sudo, piping downloads into a
   shell, and system or git-history changes are refused.
 - Risky clicks and keys need a yes. Passwords and codes are never typed or read.
+- Screenshots (`src/vision.js`) only when `needsVision` says accessibility isn't enough, of the
+  front window only, with the orb hidden; used to answer and point, never to click. Every look is
+  logged with its reason.
 - File access is limited to the home folder, never hidden folders, `~/Library` or
   secret-looking files.

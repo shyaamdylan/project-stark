@@ -553,7 +553,7 @@ function run(argv) {
   });
 
   return JSON.stringify({
-    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', document: doc, selection: sel, focused: focused, apps: apps.map(function (a) { return a.name; }),
+    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', frame: { x: owner.x, y: owner.y, w: owner.w, h: owner.h }, document: doc, selection: sel, focused: focused, apps: apps.map(function (a) { return a.name; }),
     statusPids: statusPids, visited: visited, truncated: truncated, ms: Date.now() - started, elements: elements,
   });
 }
