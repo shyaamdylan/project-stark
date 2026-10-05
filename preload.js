@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld('buddy', {
   transcribe: (wav) => ipcRenderer.invoke('transcribe', wav),
   openHub: () => ipcRenderer.send('open-hub'),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

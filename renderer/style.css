@@ -667,6 +667,109 @@ body[data-agent='jarvis'] #reactor {
   50% { box-shadow: 0 0 0 10px transparent, 0 0 32px var(--accent-glow); }
 }
 
+/* ---------- living in the notch ----------
+   The overlay covers the menu bar, and a black island grows out of the notch:
+   just wider than the notch while dormant (the orb peeks out on its right),
+   wider still while awake (what it's doing shows on the left). Speech, the
+   recording pill and captions drop down under it. */
+body.notch {
+  --orb: 22px;
+  --ear: 34px; /* how far the island reaches past each side of the notch */
+  --notch-c: calc(var(--notch-x) + var(--notch-w) / 2);
+  --below: calc(var(--notch-h) + 10px);
+}
+body.notch #buddy.awake {
+  --ear: 92px;
+}
+#island {
+  display: none;
+}
+body.notch #island {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: calc(var(--notch-x) - var(--ear));
+  width: calc(var(--notch-w) + var(--ear) * 2);
+  height: var(--notch-h);
+  background: #000;
+  border-radius: 0 0 calc(var(--notch-h) / 2.4) calc(var(--notch-h) / 2.4);
+  transition: left 0.45s cubic-bezier(0.34, 1.4, 0.64, 1), width 0.45s cubic-bezier(0.34, 1.4, 0.64, 1);
+  pointer-events: none;
+}
+body.notch #orb {
+  right: auto;
+  bottom: auto;
+  top: calc((var(--notch-h) - var(--orb)) / 2);
+  left: calc(var(--notch-x) + var(--notch-w) + var(--ear) / 2 - var(--orb) / 2);
+  transition: left 0.45s cubic-bezier(0.34, 1.4, 0.64, 1), filter 0.6s ease;
+}
+body.notch #reactor {
+  inset: -5px;
+}
+body.notch #buddy.awake:not(.flare) #orb {
+  animation: none; /* the island itself says it's awake */
+}
+body.notch #glint {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+}
+body.notch #status {
+  right: auto;
+  bottom: auto;
+  top: calc(var(--notch-h) / 2);
+  left: calc(var(--notch-x) - var(--ear) / 2);
+  transform: translate(-50%, -50%);
+  background: transparent;
+  padding: 0;
+  z-index: 1; /* above the island */
+}
+body.notch #agent-tag,
+body.notch #rec,
+body.notch #caption {
+  right: auto;
+  bottom: auto;
+  left: var(--notch-c);
+  transform: translateX(-50%);
+  animation: none;
+}
+body.notch #agent-tag {
+  top: var(--below);
+}
+body.notch #rec {
+  top: var(--below);
+}
+body.notch #caption {
+  top: calc(var(--below) + 44px);
+  text-align: center;
+}
+body.notch #bubble {
+  --bw: 300px;
+  right: auto;
+  bottom: auto;
+  top: var(--below);
+  left: calc(var(--notch-c) - var(--bw) / 2);
+  width: var(--bw);
+  transform-origin: 50% 0;
+  animation: drop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+body.notch #bubble.wide {
+  --bw: 380px;
+}
+body.notch #buddy:has(#rec:not(.hidden)) #bubble {
+  top: calc(var(--below) + 46px);
+}
+body.notch #bubble::after {
+  bottom: auto;
+  top: -7px;
+  right: auto;
+  left: calc(50% - 9px);
+}
+@keyframes drop-in {
+  from { transform: scale(0.7) translateY(-14px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .swirl,
   #body,

@@ -4,7 +4,8 @@
 // (Iron Man gold, does learned tasks for you). The orb's colours, voice and
 // phrases follow whoever you're talking to.
 //
-// The buddy is a glowing ball of energy that sits in the bottom-right corner.
+// The buddy is a glowing ball of energy that lives in the MacBook's notch (or
+// the bottom-right corner on a screen without one).
 // To point at something it squeezes a droplet of itself out (a gooey SVG
 // filter melts the two shapes together until they pinch apart), flings it
 // across the screen as a spark, and the spark becomes the cursor. Afterwards
@@ -1300,6 +1301,17 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // ---------- wiring ----------
+
+// Where the orb lives: in the notch (mode 'notch', with its place in the window)
+// or the bottom-right corner. Everything that sits around the orb follows.
+window.buddy.on('layout', (l) => {
+  const inNotch = l && l.mode === 'notch' && l.notch;
+  document.body.classList.toggle('notch', Boolean(inNotch));
+  for (const k of ['x', 'w', 'h']) {
+    if (inNotch) document.body.style.setProperty(`--notch-${k}`, `${l.notch[k]}px`);
+    else document.body.style.removeProperty(`--notch-${k}`);
+  }
+});
 
 window.buddy.on('cursor', (p) => {
   state.cursor = p;

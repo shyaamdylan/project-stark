@@ -59,6 +59,7 @@ const { transcribe } = require('./src/stt');
 const { pathToFileURL } = require('url');
 const { findBest, normalize } = require('./src/matcher');
 const voice = require('./src/voice');
+const { findNotches, overlayLayout } = require('./src/notch');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
 
@@ -67,11 +68,23 @@ let tray = null;
 let cfg = null;
 let cursorTimer = null;
 let agent = 'friday'; // who you're talking to: 'friday' or 'jarvis'
+let notches = []; // MacBook notches on connected screens (src/notch.js)
+
+// Cover a display with the overlay: the whole screen when the orb sits in the
+// notch (it draws over the menu bar), else the area under the menu bar.
+function placeOverlay(display) {
+  const layout = overlayLayout(display, notches, cfg.orbPlace);
+  win.setBounds(layout.area);
+  win.webContents.send('layout', { mode: layout.mode, notch: layout.notch });
+  return layout;
+}
 
 function createWindow() {
   const display = screen.getPrimaryDisplay();
   win = new BrowserWindow({
-    ...display.workArea,
+    ...overlayLayout(display, notches, cfg.orbPlace).area,
+    // macOS keeps windows below the menu bar unless told otherwise; in the notch the orb sits in it.
+    enableLargerThanScreen: true,
     transparent: true,
     frame: false,
     hasShadow: false,
@@ -118,6 +131,7 @@ function createWindow() {
   });
 
   win.webContents.on('did-finish-load', () => {
+    placeOverlay(screen.getDisplayMatching(win.getBounds()));
     win.webContents.send('config', {
       voice: cfg.voiceEnabled ? (cfg.elevenLabs.apiKey ? 'elevenlabs' : 'system') : 'off',
       shortcut: '⌘⇧Space',
@@ -228,7 +242,7 @@ function toLocal(rect) {
   const display = screen.getDisplayNearestPoint(center);
   const current = screen.getDisplayMatching(win.getBounds());
   if (display.id !== current.id) {
-    win.setBounds(display.workArea);
+    placeOverlay(display);
     win.webContents.send('relocated');
   }
   const b = win.getBounds();
@@ -1900,7 +1914,7 @@ if (!firstInstance) {
   app.on('second-instance', () => listen('ask'));
 }
 
-if (firstInstance) app.whenReady().then(() => {
+if (firstInstance) app.whenReady().then(async () => {
   // Before anything else prints: the whole run goes to a log file too.
   try {
     sessionLog.startSessionLog(path.join(app.getPath('userData'), 'logs'));
@@ -1931,6 +1945,7 @@ if (firstInstance) app.whenReady().then(() => {
   // The overlay listens to the microphone while you teach it.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media'));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
+  notches = await findNotches();
   createWindow();
   createTray();
   if (typed) {
@@ -1948,7 +1963,7 @@ if (firstInstance) app.whenReady().then(() => {
   }
 
   screen.on('display-metrics-changed', () => {
-    if (win) win.setBounds(screen.getDisplayMatching(win.getBounds()).workArea);
+    if (win) placeOverlay(screen.getDisplayMatching(win.getBounds()));
   });
 });
 
