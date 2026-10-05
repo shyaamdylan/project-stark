@@ -1,4 +1,4 @@
-# Project Alpha
+# Project Stark
 
 A small glowing ball of energy that sits in the bottom-right corner of your Mac screen.
 It breathes, swirls, and leans its light toward your mouse. Ask it to find a button and a
@@ -20,8 +20,8 @@ needs no AI at all; walkthroughs send Claude the list of buttons, not an image.
 You'll need [Node.js](https://nodejs.org) 20 or newer.
 
 ```bash
-git clone <this repo> project-alpha
-cd project-alpha
+git clone <this repo> project-stark
+cd project-stark
 npm install
 cp .env.example .env   # then paste your ElevenLabs key into .env (optional)
 npm start
@@ -44,7 +44,7 @@ the app:
   - Ask "how do I…" for something you've **taught it** and it walks you through it with the
     expert's steps, reasons and guardrails, moving on as you click. It only guides through
     skills it has learned; for anything else it says it hasn't learned that yet.
-- **Say "Hey Alpha"** instead of pressing anything, or "Hey Alpha, how do I…" in one go.
+- **Say "Hey Friday"** instead of pressing anything, or "Hey Friday, how do I…" in one go.
   The mic listens in the background for the wake word (speech is sent to ElevenLabs to
   check), so it's on by default only when `ELEVENLABS_API_KEY` is set. Toggle it from the 👀
   menu, or set `WAKE_WORD` / `WAKE_WORD_ENABLED` in `.env`.
@@ -91,17 +91,17 @@ All keys go in `.env`. See [`.env.example`](.env.example).
 | `VOICE_ENABLED` | Optional | `0` mutes the buddy. |
 
 Keys are only used in the main process and are never sent to the page.
-For the packaged app, put `.env` in `~/Library/Application Support/Project Alpha/`
+For the packaged app, put `.env` in `~/Library/Application Support/Project Stark/`
 (menu bar 👀 → *Open folder for .env*).
 
 ## Build a .app
 
 ```bash
-npm run dist   # → dist/Project Alpha-0.1.0.dmg (unsigned)
+npm run dist   # → dist/Project Stark-0.1.0.dmg (unsigned)
 ```
 
 Unsigned builds need right-click → Open the first time. After that, grant Accessibility to
-**Project Alpha** itself.
+**Project Stark** itself.
 
 ## How it works
 

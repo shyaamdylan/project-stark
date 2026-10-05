@@ -1,4 +1,4 @@
-// Project Alpha — main process.
+// Project Stark — main process. The buddy herself is called Friday.
 //
 // One transparent, click-through, always-on-top window covers the work area of
 // a display. The renderer draws the buddy at the bottom of it. The window only
@@ -10,14 +10,14 @@ const path = require('path');
 const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
 const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp } = require('./src/finder');
-const { Guide, findSkill, planReplay } = require('./src/guide');
+const { Guide, findSkill, planReplay, locateTarget } = require('./src/guide');
 const { Replay } = require('./src/replay');
 const { Apprentice } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
 const { transcribe } = require('./src/stt');
 const { pathToFileURL } = require('url');
-const { findBest } = require('./src/matcher');
+const { findBest, normalize } = require('./src/matcher');
 const voice = require('./src/voice');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
@@ -52,6 +52,12 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // Show the orb's own log lines ("[mic] …") in the terminal too.
+  win.webContents.on('console-message', (e) => {
+    const text = e.message;
+    if (e.level === 'error') console.error('[orb error]', text);
+    else if (text && text.startsWith('[')) console.log(text);
+  });
   // If the buddy's page ever crashes, bring it straight back instead of leaving nothing on screen.
   win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[app] overlay crashed:', details.reason);
@@ -72,7 +78,7 @@ function createWindow() {
       });
       systemPreferences.isTrustedAccessibilityClient(true); // shows the macOS prompt
     } else {
-      win.webContents.send('say', { text: `Hi! Click me or press ⌘⇧Space and tell me what to find.`, mood: 'happy' });
+      win.webContents.send('say', { text: `Hi, I'm Friday! Say "Hey Friday" or press ⌘⇧Space and tell me what you need.`, mood: 'happy' });
       warmUp();
       prewarmVoice();
     }
@@ -113,7 +119,7 @@ function listen(mode = 'ask') {
   win.webContents.send('listen', { mode });
 }
 
-// "Hey Alpha": the mic listens in the background for the wake word.
+// "Hey Friday": the mic listens in the background for the wake word.
 let wakeEnabled = null;
 function wakeOn() {
   if (wakeEnabled === null) wakeEnabled = Boolean(cfg.wakeEnabled && cfg.elevenLabs.apiKey);
@@ -164,7 +170,7 @@ const ROLE_NAMES = {
 };
 
 function stripWake(text) {
-  const word = String(cfg.wakeWord || 'alpha').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+');
+  const word = String(cfg.wakeWord || 'friday').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+');
   return String(text || '').replace(new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${word}\\b[\\s,.!?-]*`, 'i'), '').trim();
 }
 
@@ -198,7 +204,11 @@ async function ask(text) {
 
   stopGuide();
   const canGuide = Guide.available(cfg);
-  if (canGuide && looksLikeTask(text)) return startGuide(text, scan);
+  if (canGuide && looksLikeTask(text)) {
+    const res = await startGuide(text, scan);
+    // Not a learned skill: it may still be one obvious button on screen.
+    return res.reason === 'not-learned' ? locateOnScreen(text, scan) : res;
+  }
 
   const result = findBest(text, scan.elements);
   console.log(`[ask] "${text}" across ${(scan.apps || [scan.app]).join(', ')}: ${scan.elements.length} elements, best=`, result.match, result.score.toFixed(2));
@@ -237,6 +247,40 @@ let replay = null;
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
   return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i)\b/.test(t);
+}
+
+const GENERIC = new Set(['file', 'files', 'this', 'that', 'thing', 'button', 'page', 'screen', 'app', 'here', 'there', 'one', 'option', 'menu', 'find', 'click', 'press', 'open', 'go', 'see']);
+const CLICKABLE_ROLES = new Set(['AXButton', 'AXMenuButton', 'AXPopUpButton', 'AXLink', 'AXTab', 'AXMenuItem', 'AXMenuBarItem', 'AXCheckBox', 'AXRadioButton']);
+
+// One step, no route: point at a button that clearly does the task, if it's on screen.
+async function locateOnScreen(text, scan) {
+  const notHere = { ok: false, reason: 'not-learned', say: "I can't see that here, and I haven't learned how to get to it." };
+  const clickable = scan.elements.filter((e) => CLICKABLE_ROLES.has(e.role) && !e.hidden);
+  // Free first: a button labelled exactly with the key word ("export" -> Export).
+  const keyWords = text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 3 && !STOPWORDS.has(w) && !GENERIC.has(w));
+  let el = null;
+  for (const w of keyWords) {
+    // Exactly the key word only ("Export" for "export"). A label that merely
+    // starts with it ("Chat and Cowork" for "chat") is left to the careful check.
+    const hits = clickable.filter((e) => {
+      const l = normalize(e.label);
+      return l === w || l === `${w}s` || l === `${w} ...`;
+    });
+    if (hits.length) {
+      el = hits.sort((a, b) => (a.z || 0) - (b.z || 0) || normalize(a.label).length - normalize(b.label).length)[0];
+      break;
+    }
+  }
+  if (!el && keyWords.length) {
+    try {
+      el = await locateTarget(cfg.anthropicApiKey, text, scan.elements);
+    } catch (err) {
+      console.error('[locate]', err.message);
+    }
+  }
+  console.log(`[locate] "${text}" →`, el ? `${el.role} "${el.label}"` : 'nothing on screen');
+  if (!el) return notHere;
+  return { ok: true, label: el.label, role: ROLE_NAMES[el.role] || 'thing', app: el.app || scan.app, rect: toLocal(el), say: `Click ${el.label}.` };
 }
 
 // Skills that finished their debrief and have a Work Map.
@@ -692,7 +736,7 @@ ipcMain.on('prompt-closed', () => {
 
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
-      { label: 'Ask buddy (just talk)', accelerator: ASK_SHORTCUT, click: () => listen('ask') },
+      { label: 'Ask Friday (just talk)', accelerator: ASK_SHORTCUT, click: () => listen('ask') },
       { label: 'Teach me a task…', click: () => listen('teach-name') },
       {
         label: `Listen for "Hey ${cfg.wakeWord[0].toUpperCase()}${cfg.wakeWord.slice(1)}"`,
@@ -705,14 +749,14 @@ function buildTrayMenu() {
       { label: 'Open Accessibility settings', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
       { label: 'Open folder for .env (API keys)', click: () => shell.openPath(app.getPath('userData')) },
       { type: 'separator' },
-      { label: 'Quit Project Alpha', role: 'quit' },
+      { label: 'Quit Project Stark', role: 'quit' },
     ]);
 }
 
 function createTray() {
   tray = new Tray(nativeImage.createEmpty());
   tray.setTitle('👀');
-  tray.setToolTip('Project Alpha');
+  tray.setToolTip('Friday · Project Stark');
   tray.setContextMenu(buildTrayMenu());
 }
 
@@ -726,7 +770,7 @@ protocol.registerSchemesAsPrivileged([
 // One buddy at a time: launching it again just wakes the running one up.
 const firstInstance = app.requestSingleInstanceLock();
 if (!firstInstance) {
-  console.log('Project Alpha is already running. Press ⌘⇧Space to talk to it, or quit it from the 👀 menu first.');
+  console.log('Friday is already running. Press ⌘⇧Space to talk to it, or quit it from the 👀 menu first.');
   app.exit(0);
 } else {
   app.on('second-instance', () => listen('ask'));

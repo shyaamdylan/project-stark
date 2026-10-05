@@ -14,6 +14,7 @@ const Mic = (() => {
   const PRE_ROLL = 4; // keep ~0.5 s before speech starts so first words aren't clipped
   const MIN_SPEECH_MS = 450;
   const MAX_UTTERANCE_MS = 45000;
+  const HEAD_MS = 1600; // enough for "Hey Friday" with a little lead-in
 
   let ctx = null;
   let stream = null;
@@ -66,7 +67,16 @@ const Mic = (() => {
     speechMs = 0;
     quietMs = 0;
     if (opts.onEnd) opts.onEnd();
-    if (ms >= MIN_SPEECH_MS) opts.onUtterance(encodeWav(frames));
+    // Short answers ("no", "yep") are allowed when we're waiting for one.
+    const min = opts.minSpeechMs ? opts.minSpeechMs() : MIN_SPEECH_MS;
+    if (ms < min) return;
+    // The opening second and a half, for a cheap "was that for me?" check:
+    // the wake word always comes first, so there's no need to send the rest.
+    const headFrames = frames.slice(0, Math.ceil(HEAD_MS / FRAME_MS));
+    opts.onUtterance(encodeWav(frames), {
+      head: () => encodeWav(headFrames),
+      longerThanHead: frames.length > headFrames.length,
+    });
   }
 
   function onAudio(e) {

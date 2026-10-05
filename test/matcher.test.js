@@ -69,3 +69,25 @@ test('equal matches prefer the window nearer the front', () => {
   ];
   assert.equal(findBest('save', items).match.z, 0);
 });
+
+test('suggestions are only things that sound like what was said', () => {
+  const items = [
+    { role: 'AXButton', label: 'Export', x: 0, y: 0, w: 10, h: 10 },
+    { role: 'AXButton', label: 'Settings', x: 0, y: 20, w: 10, h: 10 },
+    { role: 'AXButton', label: 'Share', x: 0, y: 40, w: 10, h: 10 },
+    { role: 'AXButton', label: 'Help', x: 0, y: 60, w: 10, h: 10 },
+  ];
+  const r = findBest('expert', items); // misheard "export"
+  assert.ok(!r.match || r.match.label === 'Export');
+  for (const s of r.suggestions) assert.ok(['Export'].includes(s), `unrelated suggestion: ${s}`);
+  const none = findBest('calendar', items);
+  assert.deepEqual(none.suggestions, []);
+});
+
+test('sharing one word is not enough to be suggested', () => {
+  const items = [
+    { role: 'AXButton', label: 'More options for Local launch', x: 0, y: 0, w: 10, h: 10 },
+    { role: 'AXButton', label: 'Local launch', x: 0, y: 20, w: 10, h: 10 },
+  ];
+  assert.deepEqual(findBest('rocket launch', items).suggestions, []);
+});

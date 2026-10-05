@@ -127,14 +127,25 @@ function findBest(text, elements) {
   const { query, ranked } = rankElements(text, elements);
   const best = ranked[0] && ranked[0].score >= MATCH_THRESHOLD ? ranked[0] : null;
   const seen = new Set();
+  // Only suggest things that sound or look like what was said (a likely
+  // mishearing or typo), never just other things that happen to be on screen.
+  // Every word you said has to be close to a word in it, and it can't be much
+  // longer than what you said ("rocket launch" isn't "More options for Local launch").
+  const soundsLike = (label) => {
+    const l = normalize(label);
+    if (similarity(query.phrase, l) >= 0.6) return true;
+    const words = l.split(' ');
+    if (words.length > query.terms.length * 2 + 1) return false;
+    return query.terms.every((t) => words.some((w) => similarity(t, w) >= 0.7));
+  };
   const suggestions = [];
   for (const r of ranked) {
     const key = normalize(r.el.label);
     if (best && key === normalize(best.el.label)) continue;
-    if (seen.has(key) || r.el.role === 'AXStaticText') continue;
+    if (seen.has(key) || r.el.role === 'AXStaticText' || r.score < 0.3 || !soundsLike(r.el.label)) continue;
     seen.add(key);
     suggestions.push(r.el.label);
-    if (suggestions.length >= 3) break;
+    if (suggestions.length >= 2) break;
   }
   return { query, match: best ? best.el : null, score: best ? best.score : 0, suggestions };
 }

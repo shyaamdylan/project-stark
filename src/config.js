@@ -2,7 +2,7 @@
 //
 // Search order (later files override earlier ones, real env vars win over all):
 //   1. <project root>/.env                              (handy during `npm start`)
-//   2. ~/Library/Application Support/Project Alpha/.env (for the packaged app)
+//   2. ~/Library/Application Support/Project Stark/.env (for the packaged app)
 
 const fs = require('fs');
 const path = require('path');
@@ -52,8 +52,8 @@ function loadConfig(userDataDir) {
     anthropicApiKey: get('ANTHROPIC_API_KEY'),
     openaiApiKey: get('OPENAI_API_KEY'),
     voiceEnabled: get('VOICE_ENABLED', '1') !== '0',
-    // Say this to wake the buddy ("Hey Alpha, how do I…"). Needs ELEVENLABS_API_KEY.
-    wakeWord: get('WAKE_WORD', 'alpha'),
+    // Say this to wake the buddy ("Hey Friday, how do I…"). Needs ELEVENLABS_API_KEY.
+    wakeWord: get('WAKE_WORD', 'friday'),
     wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
   };
 }

@@ -12,8 +12,11 @@ const CACHE_LIMIT = 80;
 let fallbackVoiceId = null; // used when the configured voice isn't on this account
 
 // Expressive models take delivery cues in brackets; they're performed, not read out.
+// Only a warm cue for friendly lines. Apologies and "can't do that" get none:
+// cues like [gently] make v4 drop to a near-whisper, and the voice's normal
+// tone is already kind.
 const EXPRESSIVE = /^eleven_(v3|v4)/;
-const MOOD_TAGS = { happy: '[warmly]', worried: '[gently]', excited: '[excitedly]' };
+const MOOD_TAGS = { happy: '[warmly]' };
 
 function prepare(text, mood, modelId) {
   const tag = EXPRESSIVE.test(modelId) && MOOD_TAGS[mood];

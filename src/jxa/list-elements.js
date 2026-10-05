@@ -1,7 +1,7 @@
 // JavaScript for Automation (JXA) — run with `osascript -l JavaScript`.
 //
 // Walks the accessibility tree of every app with a window on screen (ignoring
-// Project Alpha itself) and prints JSON describing every clickable-ish element
+// Project Stark itself) and prints JSON describing every clickable-ish element
 // that isn't hidden behind another window:
 // { role, label, app, z, x, y, w, h } in global screen points, where z is the
 // stacking order of its window (0 = front).

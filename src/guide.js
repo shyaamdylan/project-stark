@@ -187,6 +187,39 @@ Use question "" unless match is "maybe".`,
   }
 }
 
+const LOCATE_SCHEMA = {
+  type: 'object',
+  properties: { target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] } },
+  required: ['target_id'],
+  additionalProperties: false,
+};
+
+// For a task it hasn't learned: is there one thing on screen right now whose
+// label clearly does it in a single click? Returns that element or null. It
+// never plans a route; that's what learned skills are for.
+async function locateTarget(apiKey, request, elements) {
+  const screen = describeScreen(elements);
+  if (!screen.chosen.length) return null;
+  const client = new Anthropic({ apiKey });
+  const response = await client.beta.messages.create({
+    model: MODEL,
+    max_tokens: 1000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: LOCATE_SCHEMA } },
+    system: 'Pick the one element on screen whose label clearly does what the user asks, in a single click (for "how do I export this", a button labelled Export). Only pick something visible in the list. If nothing on screen clearly does it in one click, return null. Never guess at a route or a hidden menu.',
+    messages: [{ role: 'user', content: `Request: "${request}"\n\nOn screen (id | role | "label" | app | x,y):\n${screen.text}` }],
+  });
+  if (response.stop_reason !== 'end_turn') return null;
+  const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  try {
+    const { target_id: id } = JSON.parse(text);
+    return Number.isInteger(id) ? screen.chosen[id] || null : null;
+  } catch {
+    return null;
+  }
+}
+
 class Guide {
   // skill: { id, map, session } from a recorded teaching session.
   constructor(apiKey, skill) {
@@ -291,4 +324,4 @@ function describeError(err) {
   return Object.assign(new Error(err.message), { say });
 }
 
-module.exports = { Guide, describeScreen, describeSkill, findSkill, planReplay };
+module.exports = { Guide, describeScreen, describeSkill, findSkill, planReplay, locateTarget };

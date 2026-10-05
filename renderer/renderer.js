@@ -1,4 +1,4 @@
-// Project Alpha — the buddy's behaviour (renderer process).
+// Project Stark — Friday's behaviour (renderer process).
 //
 // The buddy is a glowing ball of energy that sits in the bottom-right corner.
 // To point at something it squeezes a droplet of itself out (a gooey SVG
@@ -38,7 +38,7 @@ const state = {
   teaching: false,
   listening: null, // 'ask' or 'teach-name' while ⌘⇧Space is listening
   wakeEnabled: false,
-  wakeRe: null, // matches "hey alpha", "ok alpha", "alpha," at the start of what you say
+  wakeRe: null, // matches "hey friday", "ok friday", "friday," at the start of what you say
   micLevel: 0,
   lastSpoken: '',
   lastSpokenAt: 0,
@@ -803,7 +803,7 @@ function similar(a, b) {
   return hit / A.size > 0.6;
 }
 
-// "Hey Alpha, how do I…" -> { woke: true, rest: "how do I…" }. The wake word
+// "Hey Friday, how do I…" -> { woke: true, rest: "how do I…" }. The wake word
 // never goes further than this: not into requests, answers or narration.
 function splitWake(text) {
   const m = state.wakeRe && state.wakeRe.exec(text);
@@ -811,17 +811,27 @@ function splitWake(text) {
 }
 const hasWords = (t) => t.replace(/[^a-z0-9]/gi, '').length >= 2;
 
-async function heard(wav) {
+async function heard(wav, clip = {}) {
+  const active = state.listening || state.answering || state.teaching;
   let raw = '';
   try {
-    raw = await window.buddy.transcribe(wav);
+    if (!active && clip.head) {
+      // Only listening for the wake word: transcribe just the opening second
+      // and a half. Speech that isn't for the buddy costs that little and no more.
+      const opening = await window.buddy.transcribe(clip.head());
+      if (!splitWake(opening).woke) return;
+      raw = clip.longerThanHead ? await window.buddy.transcribe(wav) : opening;
+    } else {
+      raw = await window.buddy.transcribe(wav);
+    }
   } catch {
     return;
   }
+  console.log(`[mic] heard: ${JSON.stringify(raw)}${state.listening ? ` (listening: ${state.listening})` : state.answering ? ' (answering)' : state.teaching ? ' (teaching)' : ''}`);
   if (!raw) return;
   if (Date.now() - state.lastSpokenAt < 15000 && similar(raw, state.lastSpoken)) return;
   const { woke, rest: text } = splitWake(raw);
-  if (!hasWords(text) && (state.listening || state.answering || state.teaching)) return; // just "Hey Alpha"
+  if (!hasWords(text) && (state.listening || state.answering || state.teaching)) return; // just "Hey Friday"
 
   if (state.listening) {
     finishListening(text);
@@ -845,12 +855,12 @@ async function heard(wav) {
     const rest = text;
     if (state.busy) return;
     if (hasWords(rest)) {
-      // "Hey Alpha, how do I…": act on it straight away.
+      // "Hey Friday, how do I…": act on it straight away.
       if (state.guiding) stopGuide();
       state.listening = 'ask';
       finishListening(rest);
     } else {
-      // Just "Hey Alpha": listen for the request.
+      // Just "Hey Friday": listen for the request.
       startListening('ask');
       say('Yes?', { mood: 'happy', hold: 6000 });
     }
@@ -863,6 +873,7 @@ function updateMic() {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
       silenceMs: () => (state.listening ? 1100 : 1600),
+      minSpeechMs: () => (state.listening || state.answering ? 200 : 450),
       gain: () => (buddyEl.classList.contains('talking') ? 2.5 : 1),
       onStart: () => {
         // You started talking: the buddy stops and listens.
@@ -875,12 +886,14 @@ function updateMic() {
       onEnd: () => {
         buddyEl.classList.remove('hearing');
         window.buddy.teachSpeaking(false);
+        if (state.listening) armListenTimeout(6000);
       },
       onLevel: (v) => {
         state.micLevel = v;
       },
       onUtterance: heard,
     }).then((ok) => {
+      console.log(ok ? '[mic] listening' : '[mic] could not start');
       if (!ok) say("I can't hear you. Allow microphone access for me in System Settings.", { mood: 'worried' });
     });
   } else if (!want && Mic.isOn()) {
@@ -913,14 +926,19 @@ function startListening(mode) {
   flare();
   if (mode === 'teach-name') say(LISTEN_PROMPTS[mode], { mood: 'happy', hold: 15000 });
   updateMic();
-  // Nothing said at all: give up quietly.
+  armListenTimeout(mode === 'teach-name' || mode === 'confirm' ? 12000 : 7000);
+}
+
+// Nothing (usable) said: give up quietly. Re-armed after every utterance, so a
+// cough or a sound too short to count can never leave it listening forever.
+function armListenTimeout(ms) {
   clearTimeout(listenTimeout);
   listenTimeout = setTimeout(() => {
     if (state.listening && !Mic.isSpeaking()) {
       cancelListening();
-      say("I didn't hear anything. Press Command Shift Space and talk to me.", { speak: false });
+      say("I didn't catch that.", { speak: false, hold: 2500 });
     }
-  }, mode === 'teach-name' || mode === 'confirm' ? 12000 : 7000);
+  }, ms);
 }
 
 function endListening() {
@@ -990,14 +1008,14 @@ window.buddy.on('open-prompt', (p) => openPrompt(p || {}));
 window.buddy.on('say', (m) => say(m.text, { mood: m.mood, hold: 2500, speak: m.speak !== false }));
 function setWake({ enabled, wakeWord }) {
   state.wakeEnabled = Boolean(enabled);
-  const word = String(wakeWord || 'alpha').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  const word = String(wakeWord || 'friday').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
   state.wakeRe = new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${word.replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+')}\\b[\\s,.!?-]*`, 'i');
   setTimeout(updateMic, 0);
 }
 
 window.buddy.on('config', (c) => {
   state.voice = c.voice;
-  setWake(c);
+  setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });
 });
 window.buddy.on('wake', setWake);
 

@@ -26,11 +26,14 @@ body {
 
 /* ---------- the orb ---------- */
 
-#buddy {
+/* Can't find it: the energy cools to a soft rose for a moment. The filter goes
+   on the orb itself, never on #buddy: a filter on a container becomes the box
+   its absolutely positioned children are placed in, which would throw the
+   corner-pinned orb off screen. */
+#orb {
   transition: filter 0.6s ease;
 }
-/* Can't find it: the energy cools to a soft rose for a moment. */
-#buddy.worried {
+#buddy.worried #orb {
   filter: hue-rotate(150deg) saturate(1.15);
 }
 

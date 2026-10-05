@@ -1,6 +1,6 @@
 {
-  "name": "project-alpha",
-  "productName": "Project Alpha",
+  "name": "project-stark",
+  "productName": "Project Stark",
   "version": "0.1.0",
   "description": "A little animated buddy that lives at the bottom of your Mac screen, talks with an ElevenLabs voice, and points at buttons when you ask.",
   "main": "main.js",
@@ -15,8 +15,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.projectalpha.buddy",
-    "productName": "Project Alpha",
+    "appId": "com.projectstark.friday",
+    "productName": "Project Stark",
     "files": [
       "main.js",
       "preload.js",
@@ -31,7 +31,7 @@
       ],
       "extendInfo": {
         "LSUIElement": true,
-        "NSAppleEventsUsageDescription": "Project Alpha uses System Events to find buttons in the app you're using so it can point at them."
+        "NSAppleEventsUsageDescription": "Project Stark uses System Events to find buttons in the app you're using so it can point at them."
       }
     }
   },
