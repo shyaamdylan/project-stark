@@ -526,6 +526,7 @@ const hands = {
     return act.selectAll();
   },
   escape: () => act.escape(),
+  scroll: (point, lines) => withPassThrough(() => act.scroll(point, lines)),
 };
 
 const OPEN_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:open|launch|start|pull up|bring up|load)\s+(?:up\s+)?(.+?)(?:\s+for me)?(?:\s+please)?$/i;
@@ -752,10 +753,17 @@ let questionSeq = 0;
 // Readable names for the keys we record as shortcuts (⌘S, ⌃⇧P…).
 const KEY_NAMES = Object.fromEntries(Object.entries(UiohookKey).map(([name, code]) => [code, name]));
 
+// Plain Return and Tab are basic computer use, not a "shortcut" in the usual
+// sense, but they're exactly the keys an expert presses without a modifier
+// that still matter (submitting a search, moving to the next field) -- so
+// they're worth recording even though no ⌘/⌃ is held.
+const BARE_KEYS = new Set(['Enter', 'NumpadEnter', 'Tab']);
+
 function shortcutName(e) {
-  if (!e.metaKey && !e.ctrlKey) return null;
   const name = KEY_NAMES[e.keycode];
-  if (!name || /^(Meta|Ctrl|Alt|Shift)/.test(name)) return null;
+  if (!name) return null;
+  if (!e.metaKey && !e.ctrlKey) return BARE_KEYS.has(name) ? (name === 'Tab' ? 'Tab' : 'Enter') : null;
+  if (/^(Meta|Ctrl|Alt|Shift)/.test(name)) return null;
   return `${e.ctrlKey ? '⌃' : ''}${e.altKey ? '⌥' : ''}${e.shiftKey ? '⇧' : ''}${e.metaKey ? '⌘' : ''}${name.length === 1 ? name.toUpperCase() : name}`;
 }
 

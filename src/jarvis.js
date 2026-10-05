@@ -26,6 +26,9 @@ const { parseShortcut } = require('./act');
 const MODEL = 'claude-opus-5-5';
 
 const FIND_MS = 6000; // keep looking for a target this long before asking the user
+const SCROLL_AFTER_MS = 2200; // haven't found it by waiting this long: try scrolling, like a person would
+const MAX_SCROLLS = 3; // per target, before giving up to a hand-off
+const SCROLL_LINES = -12; // negative: scroll down, to reveal what's below
 const AIM_MS = 650; // let the orb's cursor arrive before clicking, so you can see what he's doing
 const SETTLE_MS = 700; // give the app a moment to react after each action
 const LOOK_MS = 1500;
@@ -52,6 +55,28 @@ function riskOf(action) {
 }
 
 const isSensitiveField = (label) => SENSITIVE_FIELD.test(String(label || ''));
+
+// A search or address bar does nothing until you press Return -- basic
+// computer use a person doesn't need telling, so Jarvis does it unprompted
+// after typing into one, rather than only when the recording happened to
+// capture the keystroke. Safari's own address bar reports as a plain
+// AXTextField labelled "smart search field", not AXSearchField, hence the
+// label check as well as the role.
+const SEARCH_LIKE_LABEL = /\bsearch\b|\baddress\b|\burl\b|smart search field/i;
+const isSearchLikeField = (role, label) => role === 'AXSearchField' || SEARCH_LIKE_LABEL.test(String(label || ''));
+
+// The middle of what's currently on screen -- a reasonable place to point the
+// scroll wheel when nothing in particular tells us which panel scrolls.
+function contentPoint(elements) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const e of elements) {
+    minX = Math.min(minX, e.x);
+    minY = Math.min(minY, e.y);
+    maxX = Math.max(maxX, e.x + e.w);
+    maxY = Math.max(maxY, e.y + e.h);
+  }
+  return Number.isFinite(minX) ? { x: (minX + maxX) / 2, y: (minY + maxY) / 2 } : null;
+}
 
 const KEY_WORDS = { '⌘': 'Command ', '⌃': 'Control ', '⌥': 'Option ', '⇧': 'Shift ' };
 function spokenKeys(keys) {
@@ -349,14 +374,29 @@ class JarvisRun {
     this.check();
   }
 
-  // Look for an action's element, rescanning while the app catches up.
+  // Look for an action's element, rescanning while the app catches up. A
+  // scrollable list only shows what's currently in view (see list-elements.js),
+  // so something not on screen yet may just be further down -- a person would
+  // scroll before giving up, so try that too before asking for help.
   async find(action, pick = locate) {
     const until = Date.now() + this.findMs;
+    let nextScrollAt = Date.now() + SCROLL_AFTER_MS;
+    let scrolls = 0;
     for (;;) {
       const s = await this.scan();
       const el = s ? pick(action, s.elements) : null;
       if (el && !el.hidden) return el;
       if (Date.now() > until) return null;
+      if (this.act.scroll && scrolls < MAX_SCROLLS && Date.now() >= nextScrollAt) {
+        const at = s ? contentPoint(s.elements) : null;
+        if (at) {
+          await this.doAct(() => this.act.scroll(at, SCROLL_LINES));
+          this.record({ kind: 'scroll', detail: `looking for "${action.label || ''}"` });
+          scrolls++;
+          nextScrollAt = Date.now() + SCROLL_AFTER_MS;
+          continue; // look again right away rather than waiting it out
+        }
+      }
       await this.wait(500);
     }
   }
@@ -458,7 +498,7 @@ class JarvisRun {
         this.emit({ type: 'step', say: plan.step_lines[a.stepIndex] || this.skill.map.steps[a.stepIndex].title, stepNo: a.stepIndex + 1, totalSteps: this.total });
       }
       await this.checkpoint(a, p, i);
-      await this.perform(a, p);
+      await this.perform(a, p, i);
     }
     this.running = false;
     return { status: 'done', say: this.s(`All done{sir}. ${this.skill.map.title} is complete.`) };
@@ -489,10 +529,10 @@ class JarvisRun {
     return a.value ?? '';
   }
 
-  async perform(a, p) {
+  async perform(a, p, i) {
     switch (a.kind) {
       case 'click': return this.doClick(a);
-      case 'edit': return this.doEdit(a, p);
+      case 'edit': return this.doEdit(a, p, i);
       case 'shortcut': return this.doShortcut(a);
       case 'choose':
       case 'any-click': return this.doChoose(a, p);
@@ -538,7 +578,7 @@ class JarvisRun {
     return this.handOff(`I can't pick out ${what} with confidence{sir}. Would you click it for me? I'll carry on from there.`);
   }
 
-  async doEdit(a, p) {
+  async doEdit(a, p, i) {
     if (isSensitiveField(a.label)) {
       // Never typed by Jarvis. The user fills it in and says when they're done.
       const answer = await this.ask(this.s(`I'll leave "${a.label}" to you{sir}; I don't type those. Fill it in, then say done.`), 'jarvis-input');
@@ -591,7 +631,19 @@ class JarvisRun {
         this.check();
       }
     }
+
+    // Basic computer sense: a search or address bar does nothing until you
+    // press Return. Skip it only if the very next recorded action already
+    // presses Return itself, so a taught Enter keystroke is never doubled up.
+    const next = i != null ? this.actions[i + 1] : null;
+    const alreadyPressesReturn = next && next.kind === 'shortcut' && /^(enter|return)$/i.test(String(next.keys || ''));
+    if (!alreadyPressesReturn && isSearchLikeField(a.role, a.label)) {
+      const spec = parseShortcut('Enter');
+      await this.doAct(() => this.act.keys(spec));
+      this.record({ kind: 'keys', detail: 'Enter', note: 'pressed automatically to submit the search' });
+      await this.wait(SETTLE_MS);
+    }
   }
 }
 
-module.exports = { JarvisRun, planRun, normalizePlan, riskOf, isSensitiveField, isYes, sameValue, describeSkillForJarvis, spokenKeys };
+module.exports = { JarvisRun, planRun, normalizePlan, riskOf, isSensitiveField, isSearchLikeField, isYes, sameValue, describeSkillForJarvis, spokenKeys };

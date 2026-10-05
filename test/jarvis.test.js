@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { JarvisRun, normalizePlan, riskOf, isSensitiveField, isYes, sameValue } = require('../src/jarvis');
+const { JarvisRun, normalizePlan, riskOf, isSensitiveField, isSearchLikeField, isYes, sameValue } = require('../src/jarvis');
 const { parseShortcut } = require('../src/act');
 const { persona } = require('../src/persona');
 
@@ -191,6 +191,114 @@ test("can't find a button: asks the user to click it, then carries on", async ()
   assert.equal(res.status, 'done');
   assert.match(said[0], /New Folder/);
   assert.ok(!h.calls.includes('click New Folder'));
+});
+
+test('a search or address bar gets pressed Return, even if nobody taught that', async () => {
+  // This is the literal sequence from the failed PianoScribe run: typing
+  // "youtube.com" into Safari's address bar (reported as a plain AXTextField
+  // labelled "smart search field") and then waiting for the "Search" field
+  // on the next page, which never appears because nothing ever submitted
+  // the address bar. Recording never captured a bare Return press (that's
+  // the teaching-side fix), so the replay side must supply basic competence
+  // on its own.
+  const barActions = [{ stepIndex: 0, first: true, kind: 'edit', role: 'AXTextField', label: 'smart search field', value: 'youtube.com' }];
+  const calls = [];
+  const run = new JarvisRun({
+    skill,
+    actions: barActions,
+    plan: normalizePlan({ can_run: true, summary: 'Go.', inputs: [], actions: [], step_lines: [] }, barActions),
+    scan: async () => ({ elements: [el('AXTextField', 'smart search field', { value: 'youtube.com' })] }),
+    act: {
+      click: async () => calls.push('click'),
+      selectAll: async () => calls.push('selectAll'),
+      type: async (t) => calls.push(`type ${t}`),
+      keys: async (k) => calls.push(`keys ${k.name}`),
+      escape: async () => calls.push('escape'),
+    },
+    ask: async () => 'yes',
+    wait: () => Promise.resolve(),
+    findMs: 30,
+  });
+  assert.equal((await run.run()).status, 'done');
+  assert.ok(calls.includes('keys Enter'), calls.join(', '));
+});
+
+test('a recorded Return after typing is not pressed twice', async () => {
+  const barActions = [
+    { stepIndex: 0, first: true, kind: 'edit', role: 'AXTextField', label: 'smart search field', value: 'youtube.com' },
+    { stepIndex: 0, first: false, kind: 'shortcut', keys: 'Enter' },
+  ];
+  const calls = [];
+  const run = new JarvisRun({
+    skill,
+    actions: barActions,
+    plan: normalizePlan({ can_run: true, summary: 'Go.', inputs: [], actions: [], step_lines: [] }, barActions),
+    scan: async () => ({ elements: [el('AXTextField', 'smart search field', { value: 'youtube.com' })] }),
+    act: {
+      click: async () => calls.push('click'),
+      selectAll: async () => calls.push('selectAll'),
+      type: async (t) => calls.push(`type ${t}`),
+      keys: async (k) => calls.push(`keys ${k.name}`),
+      escape: async () => calls.push('escape'),
+    },
+    ask: async () => 'yes',
+    wait: () => Promise.resolve(),
+    findMs: 30,
+  });
+  assert.equal((await run.run()).status, 'done');
+  assert.equal(calls.filter((c) => c === 'keys Enter').length, 1, calls.join(', '));
+});
+
+test("something further down the page: he scrolls for it instead of giving up", async () => {
+  // list-elements.js only reports what's currently in view (content scrolled
+  // out of a list is skipped entirely, not merely marked hidden), so a video
+  // a little further down a YouTube results page won't show up until Jarvis
+  // scrolls -- exactly the gap in "basic computer use" that was reported.
+  const findActions = [{ stepIndex: 0, first: true, kind: 'click', role: 'AXCell', label: 'Beneath Your Beautiful - piano cover' }];
+  const calls = [];
+  let scrolls = 0;
+  const run = new JarvisRun({
+    skill,
+    actions: findActions,
+    plan: normalizePlan({ can_run: true, summary: 'Go.', inputs: [], actions: [], step_lines: [] }, findActions),
+    scan: async () => ({
+      elements:
+        scrolls >= 2
+          ? [el('AXCell', 'Beneath Your Beautiful - piano cover', { x: 10, y: 400, w: 300, h: 80 })]
+          : [el('AXCell', 'Some other video', { x: 10, y: 50, w: 300, h: 80 })],
+    }),
+    act: {
+      click: async (r) => calls.push(`click ${r.label}`),
+      scroll: async () => { scrolls++; calls.push('scroll'); },
+      selectAll: async () => {},
+      type: async () => {},
+      keys: async () => {},
+      escape: async () => {},
+    },
+    ask: async () => 'yes',
+    wait: () => Promise.resolve(),
+    findMs: 30000,
+  });
+  // Scroll kicks in after SCROLL_AFTER_MS of real time; make the fake clock skip ahead.
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  run.waitFn = async (ms) => { offset += ms; };
+  try {
+    const res = await run.run();
+    assert.equal(res.status, 'done');
+  } finally {
+    Date.now = realNow;
+  }
+  assert.ok(scrolls >= 2, `expected at least 2 scrolls, got ${scrolls}`);
+  assert.ok(calls.includes('click Beneath Your Beautiful - piano cover'));
+});
+
+test('search-like fields, by role or label', () => {
+  assert.ok(isSearchLikeField('AXSearchField', 'Search'));
+  assert.ok(isSearchLikeField('AXTextField', 'smart search field'));
+  assert.ok(isSearchLikeField('AXTextField', 'Search videos'));
+  assert.ok(!isSearchLikeField('AXTextField', 'Cost center'));
 });
 
 test('never types into a password field', async () => {

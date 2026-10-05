@@ -69,4 +69,6 @@ module.exports = {
   keys: (spec) => runOps([{ op: 'keys', keyCode: spec.keyCode, mods: spec.mods || [] }]),
   selectAll: () => runOps([{ op: 'keys', keyCode: KEY_CODES.A, mods: ['command down'] }]),
   escape: () => runOps([{ op: 'keys', keyCode: KEY_CODES.Escape, mods: [] }]),
+  // lines < 0 scrolls down (reveals what's below point); > 0 scrolls up.
+  scroll: (point, lines) => runOps([{ op: 'scroll', x: Math.round(point.x), y: Math.round(point.y), lines }]),
 };
