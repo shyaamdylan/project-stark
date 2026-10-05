@@ -35,6 +35,29 @@ function parseShortcut(keys) {
   return { keyCode: KEY_CODES[name], mods, name };
 }
 
+// "command shift s" / "cmd+s" / "enter" -> a shortcut string like "⇧⌘S", or null.
+// Only key combinations and named keys count: "press Share" is a button, not a key.
+const SPOKEN_MODS = { command: '⌘', cmd: '⌘', control: '⌃', ctrl: '⌃', option: '⌥', alt: '⌥', shift: '⇧' };
+const SPOKEN_KEYS = {
+  enter: 'Enter', return: 'Enter', tab: 'Tab', escape: 'Escape', esc: 'Escape', space: 'Space', spacebar: 'Space',
+  delete: 'Backspace', backspace: 'Backspace', up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
+  home: 'Home', end: 'End', comma: 'Comma', period: 'Period', slash: 'Slash', minus: 'Minus', equals: 'Equal',
+};
+function spokenShortcut(text) {
+  const words = String(text || '').toLowerCase().replace(/\b(the|key|keys|button|arrow)\b/g, ' ').split(/[\s+-]+/).filter(Boolean);
+  if (!words.length) return null;
+  const mods = new Set();
+  const rest = [];
+  for (const w of words) (SPOKEN_MODS[w] ? mods.add(SPOKEN_MODS[w]) : rest.push(w));
+  if (rest.length !== 1) return null;
+  const w = rest[0].replace(/^arrow/, '');
+  let key = SPOKEN_KEYS[w] || (/^[a-z0-9]$/.test(w) ? w.toUpperCase() : /^f([1-9]|1[0-2])$/.test(w) ? w.toUpperCase() : null);
+  if (!key || (!mods.size && !SPOKEN_KEYS[w] && !/^F\d/.test(key))) return null;
+  // Same order as recorded shortcuts: ⌃⌥⇧⌘.
+  const order = ['⌃', '⌥', '⇧', '⌘'].filter((m) => mods.has(m)).join('');
+  return `${order}${key}`;
+}
+
 function runOps(ops, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', SCRIPT, JSON.stringify({ ops })], { timeout: timeoutMs }, (err, stdout, stderr) => {
@@ -64,6 +87,7 @@ const center = (r) => ({ x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h /
 module.exports = {
   KEY_CODES,
   parseShortcut,
+  spokenShortcut,
   click: (rect) => runOps([{ op: 'click', ...center(rect) }]),
   type: (text) => runOps([{ op: 'type', text: String(text) }], 30000),
   keys: (spec) => runOps([{ op: 'keys', keyCode: spec.keyCode, mods: spec.mods || [] }]),

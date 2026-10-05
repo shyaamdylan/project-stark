@@ -10,10 +10,11 @@ const fs = require('fs');
 const path = require('path');
 const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
-const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp } = require('./src/finder');
+const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp, screenFingerprint } = require('./src/finder');
 const { Guide, findSkill, planReplay, locateTarget } = require('./src/guide');
 const { Replay, buildActions } = require('./src/replay');
-const { JarvisRun, planRun, riskOf, isYes } = require('./src/jarvis');
+const { JarvisRun, JarvisFreestyle, planRun, riskOf, isYes } = require('./src/jarvis');
+const { Improviser, ImprovisedWalkthrough } = require('./src/improvise');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
 const { findFiles } = require('./src/files');
 const act = require('./src/act');
@@ -247,8 +248,12 @@ async function ask(text) {
   const canGuide = Guide.available(cfg);
   if (canGuide && looksLikeTask(text)) {
     const res = await startGuide(text, scan);
-    // Not a learned skill: it may still be one obvious button on screen.
-    return res.reason === 'not-learned' ? locateOnScreen(text, scan) : res;
+    if (res.reason !== 'not-learned') return res;
+    // Not a learned skill: it may still be one obvious button on screen...
+    const one = await locateOnScreen(text, scan);
+    if (one.ok) return one;
+    // ...and if not, she has a go anyway, and says honestly if she can't.
+    return startImprovGuide(text);
   }
 
   const result = findBest(text, scan.elements);
@@ -287,7 +292,7 @@ let replay = null;
 
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
-  return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i)\b/.test(t);
+  return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i|open|go to|search|look up|create|make|change|turn (on|off)|set ?up|add|install|get to|sign (in|up)|log in|download|upload|share|send|save|export|print)\b/.test(t);
 }
 
 const GENERIC = new Set(['file', 'files', 'this', 'that', 'thing', 'button', 'page', 'screen', 'app', 'here', 'there', 'one', 'option', 'menu', 'find', 'click', 'press', 'open', 'go', 'see']);
@@ -509,7 +514,14 @@ async function beginSkill(id, text) {
 }
 
 function stopGuide() {
-  if (!replay) return;
+  if (improv) {
+    improv.stop();
+    improv = null;
+  }
+  if (!replay) {
+    if (!teach && !jarvisRun) stopInputHook();
+    return;
+  }
   replay.stop();
   replay = null;
   if (!teach && !jarvisRun) stopInputHook();
@@ -517,7 +529,42 @@ function stopGuide() {
 
 ipcMain.on('guide-next', () => {
   if (replay) replay.skip();
+  if (improv) improv.skip();
 });
+
+// ---------- best effort: tasks nobody has taught yet ----------
+//
+// Friday still helps with things she wasn't taught (opening an app, searching
+// a site, changing a common setting), pointing at each step with Claude's
+// general knowledge. She says so up front, and stops to say it needs teaching
+// the moment she isn't confident, at the start or halfway through.
+
+let improv = null; // ImprovisedWalkthrough
+let lastUnlearned = ''; // the last thing they couldn't do: "let me show you" teaches it
+
+function startImprovGuide(goal) {
+  const brain = new Improviser(cfg.anthropicApiKey, { mode: 'guide' });
+  const w = new ImprovisedWalkthrough({
+    goal,
+    brain,
+    scan: scanFrontWindow,
+    fingerprint: screenFingerprint,
+    ask: (text) => askUser(text, 'live'),
+    thinking: () => win && win.webContents.send('guide-thinking'),
+    emit: (step) => {
+      if (improv !== w || !win) return;
+      console.log(`[improvise] ${step.status} ${step.stepNumber}:`, step.target ? step.target.label : '', step.say);
+      if (step.status === 'stuck') lastUnlearned = goal;
+      win.webContents.send('guide-step', stepPayload({ ...step, totalSteps: 0 }));
+      if (step.status !== 'step') stopGuide();
+    },
+  });
+  improv = w;
+  startInputHook();
+  setTimeout(() => w.start(), 150);
+  console.log(`[improvise] Friday has a go at "${goal}"`);
+  return { ok: true, guide: true, status: 'starting', say: '', title: '' };
+}
 ipcMain.on('guide-stop', () => stopGuide());
 
 // ---------- Jarvis: does learned tasks for you ----------
@@ -579,6 +626,46 @@ const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|t
 const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
 
+// The basics need no lesson: websites, web searches, typing and key presses.
+const URL_RE = /^(?:please\s+)?(?:go to|open|visit|pull up|bring up|navigate to|load)\s+((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)(?:\s+please)?$/i;
+const SEARCH_RE = /^(?:please\s+)?(?:search(?:\s+the\s+web|\s+google|\s+online)?(?:\s+for|\s+up)?|google|look up)\s+(.+?)(?:\s+for me)?(?:\s+please)?$/i;
+const TYPE_RE = /^(?:please\s+)?type\s+(?:out\s+)?(.+)$/i;
+const PRESS_RE = /^(?:please\s+)?(?:press|hit)\s+(.+?)(?:\s+for me)?$/i;
+
+async function jarvisBasics(text, p) {
+  const url = URL_RE.exec(text);
+  if (url) {
+    await hands.openUrl(url[1]);
+    return { ok: true, sayOnly: true, say: p.s(`Opening ${url[1].replace(/^https?:\/\//, '').replace(/\/$/, '')}{sir}.`) };
+  }
+  const search = SEARCH_RE.exec(text);
+  // "Search for shoes on Amazon" is a task on a site: that's for the best-effort path.
+  if (search && !/\s(on|in)\s+\S+$/i.test(search[1])) {
+    const q = search[1].replace(/^["']|["']$/g, '');
+    await hands.openUrl(`https://www.google.com/search?q=${encodeURIComponent(q)}`);
+    return { ok: true, sayOnly: true, say: p.s(`Searching for ${q}{sir}.`) };
+  }
+  const type = TYPE_RE.exec(text);
+  if (type) {
+    const t = type[1].replace(/^["'“]|["'”]$/g, '');
+    await refocusFrontApp();
+    await act.type(t);
+    console.log(`[jarvis] typed ${JSON.stringify(t)}`);
+    return { ok: true, sayOnly: true, say: p.s('Done{sir}.') };
+  }
+  const press = PRESS_RE.exec(text);
+  const keys = press && act.spokenShortcut(press[1]);
+  if (keys) {
+    if (riskOf({ kind: 'shortcut', keys }) && !isYes(await askUser(p.s(`That would press ${press[1]}. Shall I go ahead{sir}?`), 'jarvis-confirm'))) {
+      return { ok: true, sayOnly: true, say: p.s('Very good. I shall leave it.') };
+    }
+    await hands.keys(act.parseShortcut(keys));
+    console.log(`[jarvis] pressed ${keys}`);
+    return { ok: true, sayOnly: true, say: p.s('Done{sir}.') };
+  }
+  return null;
+}
+
 async function askJarvis(text) {
   const p = persona('jarvis', cfg);
   if (teach) return { ok: false, reason: 'busy', say: p.s("Friday is in the middle of a lesson{sir}. I'll wait until she's finished.") };
@@ -589,6 +676,14 @@ async function askJarvis(text) {
   if (LEARN_RE.test(text)) {
     setAgent('friday');
     return ask(text);
+  }
+
+  try {
+    const basic = await jarvisBasics(text, p);
+    if (basic) return basic;
+  } catch (err) {
+    console.error('[jarvis] basics', err.message);
+    return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me do that{sir}. Check Accessibility and Automation in Privacy and Security.") };
   }
 
   const open = OPEN_RE.exec(text);
@@ -625,13 +720,40 @@ async function askJarvis(text) {
     return jarvisClick(result.match, p);
   }
 
-  // Anything else: point at it, like Friday does.
+  // A short name of something on screen ("share", "the save button"): point at it.
   const result = findBest(text, scan.elements);
-  if (result.match && !result.match.hidden) {
+  if (result.match && !result.match.hidden && result.score >= 0.9 && text.split(/\s+/).length <= 4) {
     const m = result.match;
     return { ok: true, label: m.label, role: ROLE_NAMES[m.role] || 'thing', app: m.app || scan.app, rect: toLocal(m), say: p.s(`The ${m.label} ${ROLE_NAMES[m.role] || ''} is just there{sir}.`).replace(/ {2,}/g, ' ') };
   }
+
+  // Not taught: he has a go, and says honestly if he can't do it properly.
+  if (Guide.available(cfg)) return beginFreestyle(text);
   return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}. Friday can learn it from someone who knows how.") };
+}
+
+function beginFreestyle(goal) {
+  const p = persona('jarvis', cfg);
+  const run = new JarvisFreestyle({
+    goal,
+    improviser: new Improviser(cfg.anthropicApiKey, { mode: 'do', address: cfg.jarvis.address }),
+    s: p.s,
+    scan: scanFrontWindow,
+    act: hands,
+    ask: askUser,
+    emit: jarvisEmitter(() => run),
+  });
+  console.log(`[jarvis] having a go at "${goal}"`);
+  return launchJarvis(run, { title: goal, id: null });
+}
+
+// Steps, speech and where he's about to click, for the orb.
+function jarvisEmitter(getRun) {
+  return (ev) => {
+    if (!jarvisRun || jarvisRun.run !== getRun() || !win) return;
+    if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
+    else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
+  };
 }
 
 // Press one named button, with a yes first if it looks risky.
@@ -731,31 +853,24 @@ async function beginJarvis(id) {
   }
   if (!plan.can_run) return { ok: false, reason: 'declined', say: plan.why_not || p.s("I'm afraid that one needs a human touch{sir}.") };
 
-  const run = new JarvisRun({
-    skill,
-    actions,
-    plan,
-    s: p.s,
-    scan: scanFrontWindow,
-    act: hands,
-    ask: askUser,
-    emit: (ev) => {
-      if (!jarvisRun || jarvisRun.run !== run || !win) return;
-      if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
-      else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
-    },
-  });
+  const run = new JarvisRun({ skill, actions, plan, s: p.s, scan: scanFrontWindow, act: hands, ask: askUser, emit: jarvisEmitter(() => run) });
+  console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
+  return launchJarvis(run, { title: skill.map.title, id });
+}
+
+// Start a run (learned or best effort) and clean up after it, whatever happens.
+function launchJarvis(run, { title, id }) {
   jarvisRun = { run, id };
   startInputHook();
   if (tray) tray.setContextMenu(buildTrayMenu());
-  if (win) win.webContents.send('jarvis-state', { running: true, title: skill.map.title, totalSteps: run.total });
-  console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
+  if (win) win.webContents.send('jarvis-state', { running: true, title, totalSteps: run.total });
 
   // Let the renderer switch into Jarvis mode before the first question arrives.
   setTimeout(async () => {
     const result = await run.run();
-    console.log(`[jarvis] "${skill.map.title}" ended: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
+    console.log(`[jarvis] "${title}" ended: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
     if (result.error && result.reason === 'ACCESSIBILITY') systemPreferences.isTrustedAccessibilityClient(true);
+    if (result.status === 'needs_teaching') lastUnlearned = title;
     saveRunLog(id, run, result);
     if (jarvisRun && jarvisRun.run === run) jarvisRun = null;
     // A newer run may have taken over (a new request stops the old one): leave it be.
@@ -765,7 +880,7 @@ async function beginJarvis(id) {
     if (tray) tray.setContextMenu(buildTrayMenu());
     if (win) win.webContents.send('jarvis-state', { running: false, status: result.status, say: result.say });
   }, 200);
-  return { ok: true, jarvis: true, title: skill.map.title, totalSteps: run.total };
+  return { ok: true, jarvis: true, title, totalSteps: run.total };
 }
 
 function stopJarvis(reason = 'stopped') {
@@ -777,7 +892,8 @@ function stopJarvis(reason = 'stopped') {
 // Every run is written down next to the skill: what he asked, what he did, how it ended.
 function saveRunLog(id, run, result) {
   try {
-    const dir = path.join(skillDir(id), 'runs');
+    // Best-effort runs (no skill) are kept together in one folder.
+    const dir = id ? path.join(skillDir(id), 'runs') : path.join(app.getPath('userData'), 'jarvis-runs');
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date(run.startedAt || Date.now()).toISOString().replace(/[:.]/g, '-');
     fs.writeFileSync(path.join(dir, `${stamp}.json`), JSON.stringify({ skill: run.skill.map.title, startedAt: run.startedAt, status: result.status, reason: result.reason || '', log: run.log }, null, 2));
@@ -816,6 +932,7 @@ function startInputHook() {
     const p = screen.getCursorScreenPoint();
     if (teach) teach.session.onMouseDown(p.x, p.y);
     if (replay) replay.onMouseDown(p.x, p.y);
+    if (improv) improv.onInput();
     // You clicking somewhere yourself while Jarvis works stops him.
     if (jarvisRun) jarvisRun.run.onUserClick();
   });
@@ -826,6 +943,7 @@ function startInputHook() {
     const keys = shortcutName(e);
     if (teach) teach.session.onKey(keys);
     if (replay) replay.onKey(keys);
+    if (improv) improv.onInput();
   });
   uIOhook.start();
   hookRunning = true;
@@ -888,7 +1006,9 @@ function startTeach(title) {
     win.webContents.send('say', { text: 'I need an Anthropic API key to learn. Add ANTHROPIC_API_KEY to the .env file.', mood: 'worried' });
     return;
   }
-  const name = (title || '').trim() || 'Untitled task';
+  // "Let me show you" after a "needs teaching" teaches exactly that.
+  const name = (title || '').trim() || lastUnlearned || 'Untitled task';
+  lastUnlearned = '';
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const dir = path.join(app.getPath('userData'), 'workmaps', `${stamp}-${slug(name)}`);
   fs.mkdirSync(path.join(dir, 'frames'), { recursive: true });
