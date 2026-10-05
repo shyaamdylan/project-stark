@@ -170,11 +170,11 @@ when Accessibility isn't enough; `VISION_ENABLED=0` (or the 👀 menu) turns scr
 
 ### In the notch
 
-On a MacBook with a notch, the orb lives in it: a black island grows just out of the notch with
+With `ORB_PLACE=auto` in `.env`, on a MacBook with a notch the orb lives in it: a black island grows just out of the notch with
 the orb peeking out on its right. When Friday or Jarvis is awake the island widens and says what
 they're doing (Listening, Thinking, Speaking), and speech drops down underneath. Pointing still
 flies out from there. Screens without a notch keep the bottom-right corner. `ORB_PLACE=notch`
-puts it at the top centre on every screen; `ORB_PLACE=corner` keeps the corner.
+puts it at the top centre on every screen. The default, `ORB_PLACE=corner`, keeps the corner.
 
 ### Awake or dormant
 
