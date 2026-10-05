@@ -34,7 +34,7 @@ function buildActions(skill, plan) {
       const first = stepIndex !== lastStep;
       lastStep = stepIndex;
       const kind = p.kind === 'choose' ? 'choose' : p.kind === 'look' || !e ? 'look' : e.type === 'click' && RECORD_ROLES.has(e.role) ? 'choose' : p.kind;
-      return { stepIndex, first, kind, role: e ? e.role : null, label: e && kind !== 'choose' ? e.label || '' : '', keys: e ? e.keys : undefined, say: p.say };
+      return { stepIndex, first, kind, role: e ? e.role : null, label: e && kind !== 'choose' ? e.label || '' : '', keys: e ? e.keys : undefined, value: e ? e.to : undefined, say: p.say };
     });
   }
 
@@ -47,7 +47,7 @@ function buildActions(skill, plan) {
       const prev = actions[actions.length - 1];
       if (prev && prev.stepIndex === stepIndex && prev.kind === e.type && prev.label === e.label) continue; // repeated click
       const free = e.type === 'click' && RECORD_ROLES.has(e.role);
-      actions.push({ stepIndex, first, kind: free ? 'any-click' : e.type, role: e.role, label: e.label || '', keys: e.keys });
+      actions.push({ stepIndex, first, kind: free ? 'any-click' : e.type, role: e.role, label: e.label || '', keys: e.keys, value: e.to });
       first = false;
     }
     // A step with nothing to click (e.g. "check the total") still gets said; any change moves on.

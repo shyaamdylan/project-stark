@@ -2,7 +2,7 @@
   "name": "project-stark",
   "productName": "Project Stark",
   "version": "0.1.0",
-  "description": "A little animated buddy that lives at the bottom of your Mac screen, talks with an ElevenLabs voice, and points at buttons when you ask.",
+  "description": "A glowing orb on your Mac with two agents: Friday learns tasks from one person and teaches them to another; Jarvis does learned tasks for you.",
   "main": "main.js",
   "license": "MIT",
   "scripts": {
@@ -20,6 +20,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "hub-preload.js",
       "src/**/*",
       "renderer/**/*",
       "package.json"
@@ -31,7 +32,7 @@
       ],
       "extendInfo": {
         "LSUIElement": true,
-        "NSAppleEventsUsageDescription": "Project Stark uses System Events to find buttons in the app you're using so it can point at them."
+        "NSAppleEventsUsageDescription": "Project Stark uses System Events to find buttons in the app you're using so it can point at them, and so Jarvis can type and press keys when you ask him to do a task."
       }
     }
   },

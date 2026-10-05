@@ -55,6 +55,17 @@ function loadConfig(userDataDir) {
     // Say this to wake the buddy ("Hey Friday, how do I…"). Needs ELEVENLABS_API_KEY.
     wakeWord: get('WAKE_WORD', 'friday'),
     wakeEnabled: get('WAKE_WORD_ENABLED', '1') !== '0',
+    // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
+    jarvis: {
+      // ElevenLabs "George": a warm, mature British voice.
+      voiceId: get('JARVIS_VOICE_ID', 'JBFqnCBsd6RMkjVDRZzb'),
+      wakeWord: get('JARVIS_WAKE_WORD', 'jarvis'),
+      // How he addresses you: "sir", "ma'am", your name, or "none".
+      address: (() => {
+        const a = get('JARVIS_ADDRESS', 'sir').trim();
+        return /^(none|off|-)$/i.test(a) ? '' : a;
+      })(),
+    },
   };
 }
 

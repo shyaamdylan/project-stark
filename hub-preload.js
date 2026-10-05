@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('hub', {
   reveal: (id) => ipcRenderer.send('hub-reveal', id),
   openExternal: (id) => ipcRenderer.send('hub-open-external', id),
   teach: () => ipcRenderer.send('hub-teach'),
+  run: (id) => ipcRenderer.send('hub-run', id),
   onChanged: (fn) => ipcRenderer.on('hub-changed', (_e, select) => fn(select)),
 });

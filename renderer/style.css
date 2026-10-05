@@ -1,12 +1,50 @@
+/* ---------- agent colours ----------
+   Friday is cool blue energy; Jarvis is Iron Man gold and red. The colours are
+   registered so they fade from one agent to the other instead of snapping. */
+@property --core { syntax: '<color>'; inherits: true; initial-value: #5ee7ff; }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #3b82f6; }
+@property --deep { syntax: '<color>'; inherits: true; initial-value: #5b3df0; }
+@property --highlight { syntax: '<color>'; inherits: true; initial-value: #c8f6ff; }
+@property --swirl-a { syntax: '<color>'; inherits: true; initial-value: rgba(160, 120, 255, 0.7); }
+@property --swirl-b { syntax: '<color>'; inherits: true; initial-value: rgba(94, 231, 255, 0.9); }
+@property --accent-glow { syntax: '<color>'; inherits: true; initial-value: rgba(94, 231, 255, 0.5); }
+@property --glow-core { syntax: '<color>'; inherits: true; initial-value: rgba(94, 231, 255, 0.8); }
+@property --glow-accent { syntax: '<color>'; inherits: true; initial-value: rgba(59, 130, 246, 0.45); }
+@property --tip { syntax: '<color>'; inherits: true; initial-value: #e9fbff; }
+
 :root {
   --ink: #12204a;
   --core: #5ee7ff;
   --accent: #3b82f6;
+  --deep: #5b3df0;
+  --highlight: #c8f6ff;
+  --swirl-a: rgba(160, 120, 255, 0.7);
+  --swirl-b: rgba(94, 231, 255, 0.9);
   --accent-glow: rgba(94, 231, 255, 0.5);
+  --glow-core: rgba(94, 231, 255, 0.8);
+  --glow-accent: rgba(59, 130, 246, 0.45);
+  --tip: #e9fbff;
   --bubble: #ffffff;
   --orb: 64px; /* body diameter */
   --inset: 34px; /* gap from the screen corner to the orb */
   --level: 0; /* 0..1 voice loudness, set from JS while talking */
+}
+
+body {
+  transition: --core 0.9s ease, --accent 0.9s ease, --deep 0.9s ease, --highlight 0.9s ease, --swirl-a 0.9s ease,
+    --swirl-b 0.9s ease, --accent-glow 0.9s ease, --glow-core 0.9s ease, --glow-accent 0.9s ease, --tip 0.9s ease;
+}
+body[data-agent='jarvis'] {
+  --core: #ffcc4d;
+  --accent: #f26a1b;
+  --deep: #b3121b;
+  --highlight: #fff1c2;
+  --swirl-a: rgba(255, 80, 50, 0.7);
+  --swirl-b: rgba(255, 214, 102, 0.9);
+  --accent-glow: rgba(255, 196, 80, 0.5);
+  --glow-core: rgba(255, 209, 102, 0.8);
+  --glow-accent: rgba(249, 115, 22, 0.45);
+  --tip: #fff6dc;
 }
 
 html,
@@ -35,6 +73,52 @@ body {
 }
 #buddy.worried #orb {
   filter: hue-rotate(150deg) saturate(1.15);
+}
+/* Rotating gold toward blue would look like Friday; Jarvis just dims instead. */
+body[data-agent='jarvis'] #buddy.worried #orb {
+  filter: saturate(0.55) brightness(0.85);
+}
+
+/* Jarvis's arc-reactor ring: a thin segmented halo that slowly turns. */
+#reactor {
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.34, 1.56, 0.64, 1);
+  background: repeating-conic-gradient(var(--core) 0deg 22deg, transparent 22deg 30deg);
+  -webkit-mask: radial-gradient(circle closest-side, transparent calc(100% - 4px), #000 calc(100% - 3px), #000 calc(100% - 1px), transparent 100%);
+  mask: radial-gradient(circle closest-side, transparent calc(100% - 4px), #000 calc(100% - 3px), #000 calc(100% - 1px), transparent 100%);
+  filter: drop-shadow(0 0 4px var(--glow-core));
+  animation: spin 14s linear infinite;
+}
+body[data-agent='jarvis'] #reactor {
+  opacity: 0.85;
+  transform: scale(1);
+}
+#buddy.thinking #reactor {
+  animation-duration: 2.4s;
+}
+
+/* The name of who you're talking to, shown for a moment when it changes. */
+#agent-tag {
+  position: absolute;
+  right: calc(var(--inset) + var(--orb) + 14px);
+  bottom: calc(var(--inset) + var(--orb) / 2 - 13px);
+  height: 26px;
+  line-height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(10, 16, 36, 0.82);
+  color: var(--core);
+  box-shadow: 0 0 0 1px var(--accent-glow), 0 0 18px var(--accent-glow);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 #orb {
@@ -79,7 +163,7 @@ body {
   width: var(--orb);
   height: var(--orb);
   margin: calc(var(--orb) / -2) 0 0 calc(var(--orb) / -2);
-  background: radial-gradient(circle at 42% 38%, #ffffff 0%, #c8f6ff 16%, var(--core) 36%, var(--accent) 68%, #5b3df0 100%);
+  background: radial-gradient(circle at 42% 38%, #ffffff 0%, var(--highlight) 16%, var(--core) 36%, var(--accent) 68%, var(--deep) 100%);
   animation: pulse-body 3.6s ease-in-out infinite;
 }
 /* Joins body and droplet while it stretches, then thins out and snaps. */
@@ -114,11 +198,11 @@ body {
   opacity: 0.75;
 }
 .swirl.a {
-  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.85) 40deg, transparent 110deg, rgba(160, 120, 255, 0.7) 200deg, transparent 260deg);
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.85) 40deg, transparent 110deg, var(--swirl-a) 200deg, transparent 260deg);
   animation: spin 7s linear infinite;
 }
 .swirl.b {
-  background: conic-gradient(from 90deg, transparent 0deg, rgba(94, 231, 255, 0.9) 60deg, transparent 140deg, rgba(255, 255, 255, 0.5) 250deg, transparent 320deg);
+  background: conic-gradient(from 90deg, transparent 0deg, var(--swirl-b) 60deg, transparent 140deg, rgba(255, 255, 255, 0.5) 250deg, transparent 320deg);
   animation: spin 11s linear infinite reverse;
 }
 /* A bright spot that leans toward the mouse, so it feels like it's paying attention. */
@@ -433,11 +517,11 @@ body {
   pointer-events: none;
   z-index: 10;
   background: radial-gradient(circle at 40% 40%, #ffffff 0%, var(--core) 45%, var(--accent) 100%);
-  box-shadow: 0 0 12px 3px rgba(94, 231, 255, 0.8), 0 0 30px 8px rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 12px 3px var(--glow-core), 0 0 30px 8px var(--glow-accent);
 }
 .trail {
   z-index: 9;
-  box-shadow: 0 0 10px 2px rgba(94, 231, 255, 0.6);
+  box-shadow: 0 0 10px 2px var(--glow-core);
 }
 
 #pointer {
@@ -447,8 +531,12 @@ body {
   z-index: 11;
   pointer-events: none;
   overflow: visible;
-  filter: drop-shadow(0 0 4px rgba(94, 231, 255, 0.95)) drop-shadow(0 0 12px rgba(59, 130, 246, 0.6));
+  filter: drop-shadow(0 0 4px var(--glow-core)) drop-shadow(0 0 12px var(--glow-accent));
 }
+/* The cursor's gradient follows the agent too. */
+#pointer-fill stop:nth-child(1) { stop-color: var(--tip); }
+#pointer-fill stop:nth-child(2) { stop-color: var(--core); }
+#pointer-fill stop:nth-child(3) { stop-color: var(--accent); }
 #pointer path {
   fill: url(#pointer-fill);
   stroke: #fff;
@@ -488,13 +576,14 @@ body {
 }
 @keyframes ring {
   0%, 100% { box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow); }
-  50% { box-shadow: 0 0 0 10px rgba(94, 231, 255, 0.15), 0 0 32px var(--accent-glow); }
+  50% { box-shadow: 0 0 0 10px transparent, 0 0 32px var(--accent-glow); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .swirl,
   #body,
-  #plasma {
+  #plasma,
+  #reactor {
     animation: none !important;
   }
 }

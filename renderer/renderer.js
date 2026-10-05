@@ -1,4 +1,8 @@
-// Project Stark — Friday's behaviour (renderer process).
+// Project Stark — the orb's behaviour (renderer process).
+//
+// Two agents share the orb: Friday (cool blue, learns and teaches) and Jarvis
+// (Iron Man gold, does learned tasks for you). The orb's colours, voice and
+// phrases follow whoever you're talking to.
 //
 // The buddy is a glowing ball of energy that sits in the bottom-right corner.
 // To point at something it squeezes a droplet of itself out (a gooey SVG
@@ -36,9 +40,12 @@ const state = {
   promptOpen: false,
   guiding: false,
   teaching: false,
+  executing: false, // Jarvis is doing a task
+  agent: 'friday',
+  agents: {}, // name, wake word and phrases per agent (from main, see src/persona.js)
   listening: null, // 'ask' or 'teach-name' while ⌘⇧Space is listening
   wakeEnabled: false,
-  wakeRe: null, // matches "hey friday", "ok friday", "friday," at the start of what you say
+  wakeRes: [], // [{ agent, re }]: "hey friday", "ok jarvis", "friday," at the start of what you say
   micLevel: 0,
   lastSpoken: '',
   lastSpokenAt: 0,
@@ -336,7 +343,7 @@ function showBubble() {
 }
 
 function hideBubbleIfIdle() {
-  if (!state.promptOpen && !state.guiding && !state.answering && !state.listening) {
+  if (!state.promptOpen && !state.guiding && !state.executing && !state.answering && !state.listening) {
     bubble.classList.add('hidden');
     sayEl.textContent = '';
   }
@@ -385,7 +392,7 @@ async function voiceOut(text, id, mood) {
   try {
     if (state.voice === 'elevenlabs') {
       // Streamed: playback starts as soon as the first audio arrives.
-      const ok = await playAudio(`tts://speak/?text=${encodeURIComponent(text)}&mood=${encodeURIComponent(mood || '')}`, id);
+      const ok = await playAudio(`tts://speak/?text=${encodeURIComponent(text)}&mood=${encodeURIComponent(mood || '')}&agent=${state.agent}`, id);
       if (ok || id !== state.speechId) return;
     }
     await systemSpeak(text, id);
@@ -419,8 +426,17 @@ function systemSpeak(text, id) {
   return new Promise((resolve) => {
     if (!window.speechSynthesis) return resolve();
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    u.pitch = 1.25;
+    if (state.agent === 'jarvis') {
+      // A British voice if the Mac has one (Daniel is built in), a little lower and steadier.
+      const voices = speechSynthesis.getVoices();
+      const v = voices.find((x) => /daniel/i.test(x.name)) || voices.find((x) => x.lang === 'en-GB');
+      if (v) u.voice = v;
+      u.rate = 1.0;
+      u.pitch = 0.9;
+    } else {
+      u.rate = 1.05;
+      u.pitch = 1.25;
+    }
     u.onend = u.onerror = () => resolve();
     speechSynthesis.speak(u);
     setTimeout(resolve, 15000); // never hang
@@ -438,10 +454,8 @@ function systemSpeak(text, id) {
 // A short "Hmm…" or "One sec…" covers a wait so it feels like a conversation,
 // and "Got it." acknowledges an answer. Phrases come out of a shuffled bag, so
 // none repeats until the rest have been used, and fillers are sometimes
-// skipped altogether. Keep the lists in step with main.js (made ahead there).
-
-const FILLERS = ['Hmm…', 'Let me see…', 'One sec…', 'Okay, let me look…', 'Right…', 'Mm, let me check…', 'Just a moment…', 'Let me think…', 'Okay…', 'Mm-hmm, one second…'];
-const ACKS = ['Got it.', 'Okay, makes sense.', 'Thanks, that helps.', 'Mm, okay.', 'Right, got it.', 'Ah, I see.', 'Okay, noted.', 'Perfect, thanks.'];
+// skipped altogether. Each agent has its own lists (src/persona.js, sent with
+// the config), made ahead in main.js so they play instantly.
 
 function phraseBag(list) {
   let bag = [];
@@ -455,8 +469,15 @@ function phraseBag(list) {
     return last;
   };
 }
-const nextFiller = phraseBag(FILLERS);
-const nextAck = phraseBag(ACKS);
+const bags = {};
+function nextPhrase(kind) {
+  const key = `${state.agent}:${kind}`;
+  const agent = state.agents[state.agent];
+  if (!bags[key]) bags[key] = phraseBag((agent && agent[kind]) || ['…']);
+  return bags[key]();
+}
+const nextFiller = () => nextPhrase('fillers');
+const nextAck = () => nextPhrase('acks');
 
 // Say a filler if the wait goes past `afterMs` (most of the time, not always).
 // Returns a function that cancels it once the real answer is ready.
@@ -510,7 +531,8 @@ async function handleConfirm(text) {
 }
 
 async function handleAsk(input) {
-  const text = splitWake(input).rest;
+  const { agent, rest: text } = splitWake(input);
+  if (agent) switchAgent(agent);
   if (!hasWords(text)) return;
   // "teach: <task>" starts a lesson; "done" ends one.
   const teachCmd = /^teach\s*:\s*(.*)$/i.exec(text);
@@ -540,7 +562,7 @@ async function handleAsk(input) {
   }
 }
 
-async function runAsk(text, request = () => window.buddy.ask(text)) {
+async function runAsk(text, request = () => window.buddy.ask(text, state.agent)) {
   closePrompt({ refocus: false });
   window.buddy.setInteractive(false);
   buddyEl.classList.add('thinking');
@@ -567,6 +589,18 @@ async function runAsk(text, request = () => window.buddy.ask(text)) {
     await say(res.question, { mood: 'happy', hold: 15000 });
     state.busy = false;
     startListening('confirm');
+    return;
+  }
+
+  if (res.jarvis) return; // he's started: see 'jarvis-state' and 'jarvis-step'
+
+  if (res.sayOnly) {
+    // Done in one go (opened a file, pressed a button): just say so.
+    await say(res.say, { mood: 'happy', hold: 1500 });
+    if (res.home) {
+      await sleep(600);
+      await goHome();
+    }
     return;
   }
 
@@ -677,7 +711,65 @@ nextBtn.addEventListener('click', () => {
   guideThinking();
   window.buddy.guideNext();
 });
-$('guide-stop').addEventListener('click', stopGuide);
+$('guide-stop').addEventListener('click', () => (state.executing ? stopJarvis() : stopGuide()));
+
+// ---------- Jarvis at work ----------
+//
+// Main sends what he's saying, which step he's on, and where he's about to
+// click, so the orb's cursor shows each target just before he presses it.
+
+function stopJarvis() {
+  if (!state.executing) return;
+  window.buddy.jarvisStop();
+  stopSpeaking();
+  guideCount.textContent = 'Stopping…';
+}
+
+window.buddy.on('jarvis-step', (step) =>
+  queueGuide(async () => {
+    if (step.stepNo) {
+      guideCount.textContent = step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`;
+      guideBar.classList.remove('hidden');
+    }
+    if (step.say) say(step.say, { mood: 'happy', hold: 60000 });
+    if (step.rect) await pointTo(step.rect, step.label, Infinity);
+  })
+);
+
+window.buddy.on('jarvis-state', (j) => {
+  if (j.running) {
+    // Jarvis asks his questions, then works; steps arrive on 'jarvis-step'.
+    if (state.guiding) stopGuide();
+    state.executing = true;
+    guideCount.textContent = 'Preparing…';
+    nextBtn.classList.add('hidden');
+    guideBar.classList.remove('hidden');
+    showBubble();
+    setTimeout(updateMic, 0);
+    return;
+  }
+  state.executing = false;
+  nextBtn.classList.remove('hidden');
+  guideBar.classList.add('hidden');
+  guideNote.classList.add('hidden');
+  buddyEl.classList.remove('thinking');
+  setTimeout(updateMic, 0);
+  queueGuide(async () => {
+    if (j.status === 'done') flare();
+    await goHome();
+    if (j.say) await say(j.say, { mood: j.status === 'done' ? 'happy' : 'worried', hold: 2500 });
+  });
+});
+
+window.buddy.on('question-cancel', () => {
+  if (!state.answering) return;
+  state.answering = null;
+  clearTimeout(autoSendTimer);
+  answerForm.classList.add('hidden');
+  bubble.classList.remove('wide');
+  setTimeout(updateMic, 0);
+  hideBubbleIfIdle();
+});
 
 askForm.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -697,6 +789,7 @@ askInput.addEventListener('blur', () => {
 });
 
 orbEl.addEventListener('click', () => {
+  if (state.executing) return stopJarvis();
   if (state.guiding) return stopGuide();
   if (state.promptOpen) return closePrompt();
   window.buddy.openPrompt();
@@ -713,7 +806,11 @@ const answerInput = $('answer-input');
 const answerPhase = $('answer-phase');
 let recTimer = null;
 
-const PHASES = { live: 'Quick question', 'teach-back': 'Did I get it right?' };
+const PHASES = { live: 'Quick question', 'teach-back': 'Did I get it right?', 'jarvis-input': 'Jarvis needs to know', 'jarvis-confirm': 'Your go-ahead' };
+const ANSWER_HINTS = {
+  'teach-back': "Listening… say what's wrong, or just say yes",
+  'jarvis-confirm': 'Listening… say yes to go ahead, or no',
+};
 
 window.buddy.on('teach-state', (t) => {
   state.teaching = Boolean(t.recording);
@@ -748,7 +845,7 @@ window.buddy.on('teach-question', ({ id, text, phase }) => {
   bubble.classList.toggle('wide', phase === 'teach-back' || text.length > 120);
   answerPhase.textContent = PHASES[phase] || (phase.startsWith('debrief') ? `Debrief · ${phase.split(' ')[1]}` : '');
   answerInput.textContent = '';
-  answerInput.dataset.placeholder = phase === 'teach-back' ? "Listening… say what's wrong, or just say yes" : 'Listening… just answer out loud';
+  answerInput.dataset.placeholder = ANSWER_HINTS[phase] || 'Listening… just answer out loud';
   answerForm.classList.remove('hidden');
   updateMic();
   flare();
@@ -803,16 +900,19 @@ function similar(a, b) {
   return hit / A.size > 0.6;
 }
 
-// "Hey Friday, how do I…" -> { woke: true, rest: "how do I…" }. The wake word
-// never goes further than this: not into requests, answers or narration.
+// "Hey Friday, how do I…" -> { woke: true, agent: 'friday', rest: "how do I…" }.
+// The wake word never goes further than this: not into requests, answers or narration.
 function splitWake(text) {
-  const m = state.wakeRe && state.wakeRe.exec(text);
-  return m ? { woke: true, rest: text.slice(m[0].length).trim() } : { woke: false, rest: text.trim() };
+  for (const { agent, re } of state.wakeRes) {
+    const m = re.exec(text);
+    if (m) return { woke: true, agent, rest: text.slice(m[0].length).trim() };
+  }
+  return { woke: false, agent: null, rest: text.trim() };
 }
 const hasWords = (t) => t.replace(/[^a-z0-9]/gi, '').length >= 2;
 
 async function heard(wav, clip = {}) {
-  const active = state.listening || state.answering || state.teaching;
+  const active = state.listening || state.answering || state.teaching || state.executing;
   let raw = '';
   try {
     if (!active && clip.head) {
@@ -827,10 +927,17 @@ async function heard(wav, clip = {}) {
   } catch {
     return;
   }
-  console.log(`[mic] heard: ${JSON.stringify(raw)}${state.listening ? ` (listening: ${state.listening})` : state.answering ? ' (answering)' : state.teaching ? ' (teaching)' : ''}`);
+  console.log(`[mic] heard: ${JSON.stringify(raw)}${state.listening ? ` (listening: ${state.listening})` : state.answering ? ' (answering)' : state.teaching ? ' (teaching)' : state.executing ? ' (jarvis working)' : ''}`);
   if (!raw) return;
+  // "Stop" while Jarvis works stops him, even mid-question. Checked before the
+  // echo filter: stopping must never be ignored.
+  if (state.executing && /\b(stop|cancel|abort|halt|stand down|hold on|wait)\b/i.test(raw)) {
+    showCaption(raw);
+    stopJarvis();
+    return;
+  }
   if (Date.now() - state.lastSpokenAt < 15000 && similar(raw, state.lastSpoken)) return;
-  const { woke, rest: text } = splitWake(raw);
+  const { woke, agent: named, rest: text } = splitWake(raw);
   if (!hasWords(text) && (state.listening || state.answering || state.teaching)) return; // just "Hey Friday"
 
   if (state.listening) {
@@ -850,10 +957,12 @@ async function heard(wav, clip = {}) {
     window.buddy.teachNarrate(text);
     return;
   }
+  if (state.executing) return; // only "stop" (above) or answers count while he works
   // Background listening: only act when it starts with the wake word.
   if (state.wakeEnabled && woke) {
     const rest = text;
     if (state.busy) return;
+    switchAgent(named);
     if (hasWords(rest)) {
       // "Hey Friday, how do I…": act on it straight away.
       if (state.guiding) stopGuide();
@@ -862,13 +971,13 @@ async function heard(wav, clip = {}) {
     } else {
       // Just "Hey Friday": listen for the request.
       startListening('ask');
-      say('Yes?', { mood: 'happy', hold: 6000 });
+      say((state.agents[state.agent] && state.agents[state.agent].wakeReply) || 'Yes?', { mood: 'happy', hold: 6000 });
     }
   }
 }
 
 function updateMic() {
-  const want = state.teaching || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled;
+  const want = state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled;
   if (want && !Mic.isOn()) {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
@@ -916,6 +1025,10 @@ function startListening(mode) {
     return;
   }
   if (state.answering || state.busy) return;
+  if (state.executing) {
+    showCaption('Jarvis is working. Say "stop" or press Esc to stop him.');
+    return;
+  }
   if (state.guiding) stopGuide();
   state.listening = mode;
   stopSpeaking();
@@ -1006,18 +1119,59 @@ window.buddy.on('cursor', (p) => {
 });
 window.buddy.on('open-prompt', (p) => openPrompt(p || {}));
 window.buddy.on('say', (m) => say(m.text, { mood: m.mood, hold: 2500, speak: m.speak !== false }));
+function wakeRe(word) {
+  const w = String(word || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  return new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${w.replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+')}\\b[\\s,.!?-]*`, 'i');
+}
+
 function setWake({ enabled, wakeWord }) {
   state.wakeEnabled = Boolean(enabled);
-  const word = String(wakeWord || 'friday').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-  state.wakeRe = new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${word.replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+')}\\b[\\s,.!?-]*`, 'i');
+  if (wakeWord && state.agents.friday) state.agents.friday.wakeWord = wakeWord;
+  state.wakeRes = Object.entries(state.agents).map(([agent, a]) => ({ agent, re: wakeRe(a.wakeWord) }));
+  if (!state.wakeRes.length) state.wakeRes = [{ agent: 'friday', re: wakeRe(wakeWord || 'friday') }];
   setTimeout(updateMic, 0);
+}
+
+// ---------- who you're talking to ----------
+
+const agentTag = $('agent-tag');
+let agentTagTimer = null;
+
+// Recolour the orb (CSS does the fade) and briefly show the agent's name.
+function applyAgent(id, { show = true } = {}) {
+  if (!state.agents[id]) return;
+  const changed = id !== state.agent;
+  state.agent = id;
+  document.body.dataset.agent = id;
+  const a = state.agents[id];
+  orbEl.setAttribute('aria-label', `Ask ${a.name}`);
+  askInput.placeholder = id === 'jarvis' ? 'What shall I do? e.g. “open the Q3 report”' : 'What should I find? e.g. “share”';
+  if (changed && show) {
+    agentTag.textContent = a.title;
+    agentTag.classList.remove('hidden');
+    agentTag.getAnimations().forEach((x) => x.cancel());
+    agentTag.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: 'ease-out' });
+    clearTimeout(agentTagTimer);
+    agentTagTimer = setTimeout(() => agentTag.classList.add('hidden'), 2600);
+    flare();
+  }
+}
+
+// Switching here (wake word, "Jarvis, …" typed) tells main too.
+function switchAgent(id) {
+  if (!id || id === state.agent || !state.agents[id]) return;
+  applyAgent(id);
+  window.buddy.setAgent(id);
 }
 
 window.buddy.on('config', (c) => {
   state.voice = c.voice;
+  state.agents = c.agents || {};
+  applyAgent(c.agent || 'friday', { show: false });
   setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });
 });
 window.buddy.on('wake', setWake);
+window.buddy.on('agent', ({ agent }) => applyAgent(agent));
 
 // Safety net: an unexpected error is logged, and the buddy stays usable.
 window.addEventListener('error', (e) => console.error('[renderer]', e.message));

@@ -1,4 +1,5 @@
-// Project Stark — main process. The buddy herself is called Friday.
+// Project Stark — main process. Two agents share the orb: Friday learns a task
+// from one person and teaches it to another; Jarvis does a learned task for you.
 //
 // One transparent, click-through, always-on-top window covers the work area of
 // a display. The renderer draws the buddy at the bottom of it. The window only
@@ -11,7 +12,11 @@ const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
 const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp } = require('./src/finder');
 const { Guide, findSkill, planReplay, locateTarget } = require('./src/guide');
-const { Replay } = require('./src/replay');
+const { Replay, buildActions } = require('./src/replay');
+const { JarvisRun, planRun, riskOf, isYes } = require('./src/jarvis');
+const { AGENTS, persona, rendererInfo } = require('./src/persona');
+const { findFiles } = require('./src/files');
+const act = require('./src/act');
 const { Apprentice } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
@@ -26,6 +31,7 @@ let win = null;
 let tray = null;
 let cfg = null;
 let cursorTimer = null;
+let agent = 'friday'; // who you're talking to: 'friday' or 'jarvis'
 
 function createWindow() {
   const display = screen.getPrimaryDisplay();
@@ -70,6 +76,8 @@ function createWindow() {
       shortcut: '⌘⇧Space',
       wakeWord: cfg.wakeWord,
       wakeEnabled: wakeOn(),
+      agents: rendererInfo(cfg),
+      agent,
     });
     if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(false)) {
       win.webContents.send('say', {
@@ -78,7 +86,7 @@ function createWindow() {
       });
       systemPreferences.isTrustedAccessibilityClient(true); // shows the macOS prompt
     } else {
-      win.webContents.send('say', { text: `Hi, I'm Friday! Say "Hey Friday" or press ⌘⇧Space and tell me what you need.`, mood: 'happy' });
+      win.webContents.send('say', { text: persona(agent, cfg).greeting, mood: 'happy' });
       warmUp();
       prewarmVoice();
     }
@@ -132,6 +140,21 @@ function setWake(on) {
   if (tray) tray.setContextMenu(buildTrayMenu());
 }
 
+// Switch who you're talking to. The orb changes colour to match (renderer).
+// Switching away from Jarvis stops anything he's doing.
+function setAgent(id, { announce = false } = {}) {
+  if (!AGENTS.includes(id) || id === agent) return;
+  agent = id;
+  if (id !== 'jarvis') stopJarvis('switch');
+  console.log(`[agent] now talking to ${id}`);
+  if (win) win.webContents.send('agent', { agent: id });
+  if (announce && win) win.webContents.send('say', { text: persona(id, cfg).greeting, mood: 'happy' });
+  if (tray) {
+    tray.setToolTip(`${persona(id, cfg).name} · Project Stark`);
+    tray.setContextMenu(buildTrayMenu());
+  }
+}
+
 function openPrompt(prefill = '') {
   if (!win) return;
   focusOverlay();
@@ -169,21 +192,34 @@ const ROLE_NAMES = {
   AXMenuItem: 'menu item', AXDockItem: 'app in your Dock',
 };
 
-function stripWake(text) {
-  const word = String(cfg.wakeWord || 'friday').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+');
-  return String(text || '').replace(new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${word}\\b[\\s,.!?-]*`, 'i'), '').trim();
+// "Hey Friday, …" / "Jarvis, …" -> which agent was named (if any) and the rest.
+function wakePattern(word) {
+  const w = String(word || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').trim().replace(/ph/g, '(?:ph|f)').replace(/ /g, '[\\s,]+');
+  return new RegExp(`^\\s*(?:(?:hey|hi|okay|ok|yo)[\\s,.!]+)?${w}\\b[\\s,.!?-]*`, 'i');
 }
+function splitWake(text) {
+  const t = String(text || '');
+  for (const id of AGENTS) {
+    const m = wakePattern(persona(id, cfg).wakeWord).exec(t);
+    if (m) return { agent: id, rest: t.slice(m[0].length).trim() };
+  }
+  return { agent: null, rest: t.trim() };
+}
+const stripWake = (text) => splitWake(text).rest;
 
-ipcMain.handle('ask', async (_e, rawText) => {
+ipcMain.handle('ask', async (_e, rawText, who) => {
   try {
-    return await ask(stripWake(rawText));
+    const { agent: named, rest } = splitWake(rawText);
+    setAgent(named || who);
+    return await (agent === 'jarvis' ? askJarvis(rest) : ask(rest));
   } catch (err) {
     console.error('[ask]', err);
-    return { ok: false, reason: 'error', say: 'Something went wrong. Try again.' };
+    return { ok: false, reason: 'error', say: persona(agent, cfg).s('Something went wrong{sir}. Try again.') };
   }
 });
 
-async function ask(text) {
+// Scan everything on screen for a request, or a ready-made reply explaining why not.
+async function scanForAsk() {
   let scan;
   try {
     scan = await scanFrontApp({ activate: true });
@@ -191,16 +227,21 @@ async function ask(text) {
     console.error('[scan]', err.message);
     if (err.code === 'ACCESSIBILITY') {
       systemPreferences.isTrustedAccessibilityClient(true);
-      return { ok: false, reason: 'permission', say: 'I need Accessibility permission first.' };
+      return { reply: { ok: false, reason: 'permission', say: 'I need Accessibility permission first.' } };
     }
     if (err.code === 'AUTOMATION') {
       shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation');
-      return { ok: false, reason: 'permission', say: 'I need Automation permission first.' };
+      return { reply: { ok: false, reason: 'permission', say: 'I need Automation permission first.' } };
     }
-    return { ok: false, reason: 'error', say: "I couldn't look just now." };
+    return { reply: { ok: false, reason: 'error', say: "I couldn't look just now." } };
   }
+  if (scan.error) return { reply: { ok: false, reason: scan.error, say: "I can't see an app window." } };
+  return { scan };
+}
 
-  if (scan.error) return { ok: false, reason: scan.error, say: "I can't see an app window." };
+async function ask(text) {
+  const { scan, reply } = await scanForAsk();
+  if (reply) return reply;
 
   stopGuide();
   const canGuide = Guide.available(cfg);
@@ -345,24 +386,30 @@ async function startGuide(text, scan, otherwise = null) {
     reason: 'not-learned',
     say: "I haven't learned that yet.",
   };
-  // Only ask Claude when the request shares a real word with something it has learned.
-  const skills = learnedSkills().filter((sk) => sharesWords(text, `${sk.title} ${sk.summary}`));
-  if (!skills.length) return notLearned;
   let found;
   try {
-    found = await findSkill(cfg.anthropicApiKey, text, skills);
+    found = await matchSkill(text);
   } catch (err) {
     console.error('[guide] skill lookup', err.message);
     return { ok: false, reason: 'guide', say: "I couldn't check that just now." };
   }
-  console.log(`[guide] "${text}" → skill: ${found.id || 'none'} (${found.match})`);
-  if (!found.id) return notLearned;
+  if (!found || !found.id) return notLearned;
   if (found.match === 'maybe') {
     // Close, but not certain: check before walking them through the wrong thing.
-    pendingClarify = { id: found.id, text, at: Date.now() };
+    pendingClarify = { id: found.id, text, at: Date.now(), agent: 'friday' };
     return { ok: true, clarify: true, question: found.question };
   }
   return beginSkill(found.id, text);
+}
+
+// Which learned skill (if any) a request is for. Only asks Claude when the
+// request shares a real word with something it has learned.
+async function matchSkill(text) {
+  const skills = learnedSkills().filter((sk) => sharesWords(text, `${sk.title} ${sk.summary}`));
+  if (!skills.length) return null;
+  const found = await findSkill(cfg.anthropicApiKey, text, skills);
+  console.log(`[skills] "${text}" → ${found.id || 'none'} (${found.match})`);
+  return found;
 }
 
 // After a clarifying question: yes starts the skill, no says so, anything else is a new request.
@@ -372,11 +419,16 @@ ipcMain.handle('confirm', async (_e, rawText) => {
     const text = stripWake(rawText);
     const pending = pendingClarify && Date.now() - pendingClarify.at < 60000 ? pendingClarify : null;
     pendingClarify = null;
-    if (!pending) return ask(text);
+    const again = () => (agent === 'jarvis' ? askJarvis(text) : ask(text));
+    if (!pending) return again();
     const t = text.toLowerCase();
-    if (/^(no|nope|nah|not really|not quite|wrong|neither)\b/.test(t)) return { ok: false, reason: 'not-learned', say: "Sorry, I can't do that one yet." };
-    if (/^(yes|yeah|yep|yup|sure|correct|right|exactly|that'?s (it|right)|it is|i do|please|ok(ay)?)\b/.test(t)) return beginSkill(pending.id, pending.text);
-    return ask(text);
+    if (/^(no|nope|nah|not really|not quite|wrong|neither)\b/.test(t)) {
+      return { ok: false, reason: 'not-learned', say: pending.agent === 'jarvis' ? persona('jarvis', cfg).s("Then I'm afraid I haven't been taught that one{sir}.") : "Sorry, I can't do that one yet." };
+    }
+    if (/^(yes|yeah|yep|yup|sure|correct|right|exactly|that'?s (it|right)|it is|i do|please|ok(ay)?)\b/.test(t)) {
+      return pending.agent === 'jarvis' ? beginJarvis(pending.id) : beginSkill(pending.id, pending.text);
+    }
+    return again();
   } catch (err) {
     console.error('[confirm]', err);
     return { ok: false, reason: 'error', say: 'Something went wrong. Try again.' };
@@ -432,13 +484,264 @@ function stopGuide() {
   if (!replay) return;
   replay.stop();
   replay = null;
-  if (!teach) stopInputHook();
+  if (!teach && !jarvisRun) stopInputHook();
 }
 
 ipcMain.on('guide-next', () => {
   if (replay) replay.skip();
 });
 ipcMain.on('guide-stop', () => stopGuide());
+
+// ---------- Jarvis: does learned tasks for you ----------
+//
+// Friday teaches a skill; Jarvis carries it out on your screen (src/jarvis.js),
+// asking only for what's specific to this case and for a yes before anything
+// risky. He can also open files and press a button you name.
+
+let jarvisRun = null; // { run, id }
+let passThrough = 0; // >0 while Jarvis's own clicks are in flight
+
+// While Jarvis clicks, the overlay lets every click through, even over the bubble.
+async function withPassThrough(fn) {
+  passThrough++;
+  overlayInteractive = false;
+  if (win) win.setIgnoreMouseEvents(true, { forward: true });
+  try {
+    return await fn();
+  } finally {
+    setTimeout(() => passThrough--, 250);
+  }
+}
+
+// Jarvis's hands. Keys go to the app you're working in, never to the overlay.
+const hands = {
+  click: (rect) => withPassThrough(() => act.click(rect)),
+  type: (text) => act.type(text),
+  keys: async (spec) => {
+    await refocusFrontApp();
+    return act.keys(spec);
+  },
+  selectAll: async () => {
+    await refocusFrontApp();
+    return act.selectAll();
+  },
+  escape: () => act.escape(),
+};
+
+const OPEN_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:open|launch|start|pull up|bring up|load)\s+(?:up\s+)?(.+?)(?:\s+for me)?(?:\s+please)?$/i;
+const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|tap|hit)\s+(?:on\s+)?(?:the\s+)?(.+?)(?:\s+(?:button|link|tab))?(?:\s+for me)?(?:\s+please)?$/i;
+// "open the File menu" is about the screen, not a file.
+const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
+const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
+
+async function askJarvis(text) {
+  const p = persona('jarvis', cfg);
+  if (teach) return { ok: false, reason: 'busy', say: p.s("Friday is in the middle of a lesson{sir}. I'll wait until she's finished.") };
+  stopGuide();
+  stopJarvis('new-request');
+
+  // "How do I…" is a request to learn, which is Friday's department.
+  if (LEARN_RE.test(text)) {
+    setAgent('friday');
+    return ask(text);
+  }
+
+  const open = OPEN_RE.exec(text);
+  if (open && !UI_WORDS.test(open[1])) {
+    const res = await openFileRequest(open[1], p);
+    if (res) return res;
+  }
+
+  if (Guide.available(cfg)) {
+    let found = null;
+    try {
+      found = await matchSkill(text);
+    } catch (err) {
+      console.error('[jarvis] skill lookup', err.message);
+    }
+    if (found && found.id) {
+      if (found.match === 'maybe') {
+        pendingClarify = { id: found.id, text, at: Date.now(), agent: 'jarvis' };
+        return { ok: true, clarify: true, question: found.question };
+      }
+      return beginJarvis(found.id);
+    }
+  }
+
+  const { scan, reply } = await scanForAsk();
+  if (reply) return { ...reply, say: p.s(`${reply.say.replace(/\.$/, '')}{sir}.`) };
+  const clickable = scan.elements.filter((e) => CLICKABLE_ROLES.has(e.role) && !e.hidden);
+
+  // "Click Share": he presses it himself.
+  const click = CLICK_RE.exec(text);
+  if (click) {
+    const result = findBest(click[1], clickable);
+    if (!result.match || result.score < 0.8) return { ok: false, reason: 'not-found', say: p.s(`I'm afraid I can't see "${click[1]}"{sir}.`) };
+    return jarvisClick(result.match, p);
+  }
+
+  // Anything else: point at it, like Friday does.
+  const result = findBest(text, scan.elements);
+  if (result.match && !result.match.hidden) {
+    const m = result.match;
+    return { ok: true, label: m.label, role: ROLE_NAMES[m.role] || 'thing', app: m.app || scan.app, rect: toLocal(m), say: p.s(`The ${m.label} ${ROLE_NAMES[m.role] || ''} is just there{sir}.`).replace(/ {2,}/g, ' ') };
+  }
+  return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}. Friday can learn it from someone who knows how.") };
+}
+
+// Press one named button, with a yes first if it looks risky.
+async function jarvisClick(el, p) {
+  if (riskOf({ kind: 'click', label: el.label })) {
+    const answer = await askUser(p.s(`That will press "${el.label}". Shall I go ahead{sir}?`), 'jarvis-confirm');
+    if (!isYes(answer)) return { ok: true, sayOnly: true, say: p.s('Very good. I shall leave it.') };
+  }
+  win.webContents.send('jarvis-step', { rect: toLocal(el), label: el.label });
+  await new Promise((r) => setTimeout(r, 900)); // let the cursor arrive so you can see what he's pressing
+  try {
+    await hands.click(el);
+  } catch (err) {
+    console.error('[jarvis] click', err.message);
+    return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me click that{sir}. Check Accessibility in Privacy and Security.") };
+  }
+  console.log(`[jarvis] clicked ${el.role} "${el.label}"`);
+  return { ok: true, sayOnly: true, home: true, say: p.s(`Done{sir}.`) };
+}
+
+// "Open the Q3 report": find it with Spotlight and open it in its usual app.
+// Returns null if nothing matches, so the request can be tried as something else.
+async function openFileRequest(what, p) {
+  let found;
+  try {
+    found = await findFiles(what);
+  } catch (err) {
+    console.error('[jarvis] file search', err.message);
+    return null;
+  }
+  console.log(`[jarvis] open "${what}" →`, found.map((f) => `${f.name} (${f.score.toFixed(2)}${f.blocked ? `, ${f.blocked}` : ''})`).join(', ') || 'nothing');
+  if (!found.length) return null;
+
+  let pick = found[0];
+  const close = found.filter((f) => f.score >= pick.score - 0.05);
+  if (close.length > 1) {
+    const names = close.slice(0, 3);
+    const answer = await askUser(
+      p.s(`I found ${names.length} likely candidates: ${names.map((f, i) => `${i + 1}, ${f.name}`).join('; ')}. Which one{sir}?`),
+      'jarvis-input'
+    );
+    if (!answer) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
+    const n = { one: 1, first: 1, '1': 1, two: 2, second: 2, '2': 2, three: 3, third: 3, '3': 3 }[(/\b(one|two|three|first|second|third|[123])\b/i.exec(answer) || [])[1]?.toLowerCase()];
+    pick = n ? names[n - 1] : findBest(answer, names.map((f) => ({ ...f, label: f.name, role: 'AXButton' }))).match;
+    if (!pick) return { ok: false, reason: 'not-found', say: p.s("I'm afraid I didn't catch which one{sir}.") };
+  }
+
+  if (pick.blocked) {
+    const why = pick.blocked === 'app-outside-applications'
+      ? `I'd rather not launch an app from outside your Applications folder{sir}. "${pick.name}" stays closed.`
+      : `"${pick.name}" would run code on your Mac, so I'll leave that one to you{sir}.`;
+    console.log(`[jarvis] refused to open ${pick.path} (${pick.blocked})`);
+    return { ok: false, reason: 'blocked', say: p.s(why) };
+  }
+  const err = await shell.openPath(pick.path);
+  if (err) {
+    console.error('[jarvis] open', pick.path, err);
+    return { ok: false, reason: 'error', say: p.s(`I couldn't open "${pick.name}"{sir}.`) };
+  }
+  console.log(`[jarvis] opened ${pick.path}`);
+  return { ok: true, sayOnly: true, say: p.s(`Opening ${pick.name.replace(/\.[^.]+$/, '')}{sir}.`) };
+}
+
+// Jarvis's plan for a skill (which values to ask for, what to confirm), made once.
+async function jarvisPlan(id, skill, actions) {
+  const file = path.join(skillDir(id), 'jarvis.json');
+  const key = `${actions.length}|${cfg.jarvis.address}`;
+  const saved = readJson(file);
+  if (saved && saved.key === key) return saved.plan;
+  const plan = await planRun(cfg.anthropicApiKey, skill, actions, cfg.jarvis.address);
+  fs.writeFileSync(file, JSON.stringify({ key, plan }, null, 2));
+  console.log(`[jarvis] plan for "${skill.map.title}": ${plan.inputs.length} questions, can_run=${plan.can_run}`);
+  return plan;
+}
+
+async function beginJarvis(id) {
+  const p = persona('jarvis', cfg);
+  const skill = loadSkill(id);
+  if (!skill) return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}.") };
+
+  let recorded = null;
+  try {
+    recorded = await replayPlan(id, skill);
+  } catch (err) {
+    console.error('[jarvis] replay plan', err.message); // fall back to the raw recording
+  }
+  const actions = buildActions(skill, recorded);
+  if (!actions.length) return { ok: false, reason: 'empty', say: p.s("There's nothing in that lesson I can actually do{sir}.") };
+
+  let plan;
+  try {
+    plan = await jarvisPlan(id, skill, actions);
+  } catch (err) {
+    console.error('[jarvis] plan', err.message);
+    return { ok: false, reason: 'guide', say: p.s("I couldn't prepare that one just now{sir}. Try again in a moment.") };
+  }
+  if (!plan.can_run) return { ok: false, reason: 'declined', say: plan.why_not || p.s("I'm afraid that one needs a human touch{sir}.") };
+
+  const run = new JarvisRun({
+    skill,
+    actions,
+    plan,
+    s: p.s,
+    scan: scanFrontWindow,
+    act: hands,
+    ask: askUser,
+    emit: (ev) => {
+      if (!jarvisRun || jarvisRun.run !== run || !win) return;
+      if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
+      else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
+    },
+  });
+  jarvisRun = { run, id };
+  startInputHook();
+  if (tray) tray.setContextMenu(buildTrayMenu());
+  if (win) win.webContents.send('jarvis-state', { running: true, title: skill.map.title, totalSteps: run.total });
+  console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
+
+  // Let the renderer switch into Jarvis mode before the first question arrives.
+  setTimeout(async () => {
+    const result = await run.run();
+    console.log(`[jarvis] "${skill.map.title}" ended: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
+    if (result.error && result.reason === 'ACCESSIBILITY') systemPreferences.isTrustedAccessibilityClient(true);
+    saveRunLog(id, run, result);
+    if (jarvisRun && jarvisRun.run === run) jarvisRun = null;
+    // A newer run may have taken over (a new request stops the old one): leave it be.
+    if (jarvisRun) return;
+    cancelQuestions();
+    if (!replay && !teach) stopInputHook();
+    if (tray) tray.setContextMenu(buildTrayMenu());
+    if (win) win.webContents.send('jarvis-state', { running: false, status: result.status, say: result.say });
+  }, 200);
+  return { ok: true, jarvis: true, title: skill.map.title, totalSteps: run.total };
+}
+
+function stopJarvis(reason = 'stopped') {
+  if (!jarvisRun) return;
+  jarvisRun.run.stop(reason);
+  cancelQuestions();
+}
+
+// Every run is written down next to the skill: what he asked, what he did, how it ended.
+function saveRunLog(id, run, result) {
+  try {
+    const dir = path.join(skillDir(id), 'runs');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date(run.startedAt || Date.now()).toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(dir, `${stamp}.json`), JSON.stringify({ skill: run.skill.map.title, startedAt: run.startedAt, status: result.status, reason: result.reason || '', log: run.log }, null, 2));
+  } catch (err) {
+    console.error('[jarvis] log', err.message);
+  }
+}
+
+ipcMain.on('jarvis-stop', () => stopJarvis('user'));
+ipcMain.on('set-agent', (_e, id) => setAgent(id));
 
 // ---------- teaching sessions (the apprentice watches an expert) ----------
 
@@ -467,8 +770,12 @@ function startInputHook() {
     const p = screen.getCursorScreenPoint();
     if (teach) teach.session.onMouseDown(p.x, p.y);
     if (replay) replay.onMouseDown(p.x, p.y);
+    // You clicking somewhere yourself while Jarvis works stops him.
+    if (jarvisRun) jarvisRun.run.onUserClick();
   });
   uIOhook.on('keydown', (e) => {
+    // Esc always stops Jarvis, wherever the keyboard is.
+    if (jarvisRun && e.keycode === UiohookKey.Escape) jarvisRun.run.onEscape();
     if (overlayInteractive) return;
     const keys = shortcutName(e);
     if (teach) teach.session.onKey(keys);
@@ -518,8 +825,19 @@ ipcMain.on('teach-answer', (_e, { id, text }) => {
   resolve((text || '').trim());
 });
 
+// Drop any open question (as if skipped) and close it on screen.
+function cancelQuestions() {
+  if (!answerWaiters.size) return;
+  for (const resolve of answerWaiters.values()) resolve('');
+  answerWaiters.clear();
+  if (win) win.webContents.send('question-cancel');
+}
+
 function startTeach(title) {
   if (teach) return;
+  // Lessons are Friday's department.
+  setAgent('friday');
+  stopJarvis('teach');
   if (!Guide.available(cfg)) {
     win.webContents.send('say', { text: 'I need an Anthropic API key to learn. Add ANTHROPIC_API_KEY to the .env file.', mood: 'worried' });
     return;
@@ -556,7 +874,7 @@ async function finishTeach() {
   if (!teach || !teach.session.running) return;
   const { session, dir } = teach;
   win.webContents.send('teach-state', { recording: false, debrief: true, title: session.title });
-  if (!replay) stopInputHook();
+  if (!replay && !jarvisRun) stopInputHook();
   try {
     const map = await session.finish();
     fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify(session.toJSON(), null, 2));
@@ -694,23 +1012,35 @@ ipcMain.on('hub-open-external', (_e, id) => {
   if (dir) shell.openPath(path.join(dir, 'index.html'));
 });
 ipcMain.on('hub-teach', () => listen('teach-name'));
+// "Have Jarvis do it": get the Skills Hub out of the way so he can see (and click) the app.
+ipcMain.on('hub-run', async (_e, id) => {
+  if (teach) return;
+  setAgent('jarvis');
+  if (hub && !hub.isDestroyed()) hub.minimize();
+  await refocusFrontApp();
+  stopGuide();
+  stopJarvis('new-request');
+  const res = await beginJarvis(path.basename(String(id)));
+  if (!res.ok && win) win.webContents.send('say', { text: res.say, mood: 'worried' });
+});
 ipcMain.on('open-hub', () => openHub());
 
-// Short phrases said while waiting, made ahead so they play instantly.
-// Keep in step with FILLERS / ACKS in renderer.js.
-const FILLER_LINES = ['Hmm…', 'Let me see…', 'One sec…', 'Okay, let me look…', 'Right…', 'Mm, let me check…', 'Just a moment…', 'Let me think…', 'Okay…', 'Mm-hmm, one second…'];
-const ACK_LINES = ['Got it.', 'Okay, makes sense.', 'Thanks, that helps.', 'Mm, okay.', 'Right, got it.', 'Ah, I see.', 'Okay, noted.', 'Perfect, thanks.'];
+// Short phrases said while waiting, made ahead so they play instantly. The
+// renderer gets the same lists (src/persona.js) with the config.
 function prewarmVoice() {
   if (!cfg.elevenLabs.apiKey || !cfg.voiceEnabled) return;
   (async () => {
-    for (const line of FILLER_LINES) await voice.synthesize(line, cfg, '').catch(() => {});
-    for (const line of ACK_LINES) await voice.synthesize(line, cfg, 'happy').catch(() => {});
+    for (const id of [agent, ...AGENTS.filter((a) => a !== agent)]) {
+      const p = persona(id, cfg);
+      for (const line of p.fillers) await voice.synthesize(line, cfg, '', id).catch(() => {});
+      for (const line of p.acks) await voice.synthesize(line, cfg, 'happy', id).catch(() => {});
+    }
   })();
 }
 
 ipcMain.handle('speak', async (_e, text) => {
   try {
-    const buf = await voice.synthesize(text, cfg);
+    const buf = await voice.synthesize(text, cfg, 'happy', agent);
     return { audio: buf ? buf.toString('base64') : null };
   } catch (err) {
     console.error('[voice]', err.message);
@@ -720,6 +1050,8 @@ ipcMain.handle('speak', async (_e, text) => {
 
 ipcMain.on('set-interactive', (_e, interactive) => {
   if (!win) return;
+  // While Jarvis is clicking, the overlay must never catch the mouse.
+  if (interactive && passThrough) return;
   overlayInteractive = interactive;
   if (interactive) win.setIgnoreMouseEvents(false);
   else win.setIgnoreMouseEvents(true, { forward: true });
@@ -736,10 +1068,15 @@ ipcMain.on('prompt-closed', () => {
 
 function buildTrayMenu() {
   return Menu.buildFromTemplate([
-      { label: 'Ask Friday (just talk)', accelerator: ASK_SHORTCUT, click: () => listen('ask') },
+      { label: `Ask ${persona(agent, cfg).name} (just talk)`, accelerator: ASK_SHORTCUT, click: () => listen('ask') },
+      { type: 'separator' },
+      { label: 'Friday: learns and teaches tasks', type: 'radio', checked: agent === 'friday', click: () => setAgent('friday', { announce: true }) },
+      { label: 'Jarvis: does tasks for you', type: 'radio', checked: agent === 'jarvis', click: () => setAgent('jarvis', { announce: true }) },
+      { label: 'Stop Jarvis (Esc)', enabled: Boolean(jarvisRun), click: () => stopJarvis('menu') },
+      { type: 'separator' },
       { label: 'Teach me a task…', click: () => listen('teach-name') },
       {
-        label: `Listen for "Hey ${cfg.wakeWord[0].toUpperCase()}${cfg.wakeWord.slice(1)}"`,
+        label: `Listen for "Hey ${cfg.wakeWord[0].toUpperCase()}${cfg.wakeWord.slice(1)}" / "Hey ${cfg.jarvis.wakeWord[0].toUpperCase()}${cfg.jarvis.wakeWord.slice(1)}"`,
         type: 'checkbox',
         checked: wakeOn(),
         enabled: Boolean(cfg.elevenLabs.apiKey),
@@ -786,7 +1123,8 @@ if (firstInstance) app.whenReady().then(() => {
   protocol.handle('tts', async (req) => {
     const u = new URL(req.url);
     try {
-      return await voice.stream(u.searchParams.get('text') || '', cfg, u.searchParams.get('mood') || '');
+      const who = AGENTS.includes(u.searchParams.get('agent')) ? u.searchParams.get('agent') : 'friday';
+      return await voice.stream(u.searchParams.get('text') || '', cfg, u.searchParams.get('mood') || '', who);
     } catch (err) {
       console.error('[voice]', err.message);
       return new Response('', { status: 502 });
@@ -813,6 +1151,7 @@ process.on('uncaughtException', (err) => console.error('[main] uncaught', err));
 process.on('unhandledRejection', (err) => console.error('[main] unhandled rejection', err));
 
 app.on('will-quit', () => {
+  stopJarvis('quit');
   globalShortcut.unregisterAll();
   stopInputHook();
 });

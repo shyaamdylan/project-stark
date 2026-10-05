@@ -18,6 +18,8 @@ button { font: inherit; font-weight: 600; border: 1px solid var(--line); backgro
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 10px 12px; }
 button.danger { color: var(--danger); }
+button.jarvis { background: linear-gradient(135deg, #ffcc4d, #f26a1b); border-color: #f26a1b; color: #3a1300; }
+button:disabled { opacity: 0.45; cursor: default; }
 #search { margin: 12px 0 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; outline: none; }
 #search:focus { border-color: var(--accent); }
 #list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }

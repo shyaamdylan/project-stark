@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' data: tts:; img-src 'self' data:" />
-    <title>Friday</title>
+    <title>Project Stark</title>
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body data-agent="friday">
     <!-- Gooey "metaball" filter: blurs shapes together, then sharpens the alpha
          so two nearby blobs melt into one and pinch apart as they separate. -->
     <svg width="0" height="0" style="position: absolute" aria-hidden="true">
@@ -66,7 +66,11 @@
         <button id="rec-finish" type="button">Finish</button>
       </div>
 
+      <!-- Who you're talking to, shown for a moment when it changes -->
+      <div id="agent-tag" class="hidden"></div>
+
       <div id="orb" class="hit" role="button" aria-label="Ask Friday">
+        <div id="reactor"></div>
         <div id="goo-glow">
           <div id="goo">
             <div id="body"></div>

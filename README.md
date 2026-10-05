@@ -1,5 +1,15 @@
 # Project Stark
 
+Two agents share one glowing orb in the corner of your Mac screen:
+
+- **Friday** (cool blue) learns a task by watching someone who knows it, then teaches it
+  to anyone else, pointing at each button as they go.
+- **Jarvis** (Iron Man gold, with an arc-reactor ring) just *does* a task Friday has learned,
+  for you. He asks only for what's specific to this case, checks with you before anything
+  risky, and can open your files. He sounds like the butler from Iron Man.
+
+The orb's colour, voice and name tag always show who you're talking to.
+
 A small glowing ball of energy that sits in the bottom-right corner of your Mac screen.
 It breathes, swirls, and leans its light toward your mouse. Ask it to find a button and a
 droplet of it squeezes out, flies across the screen, and turns into a cursor pointing at
@@ -49,6 +59,43 @@ the app:
   check), so it's on by default only when `ELEVENLABS_API_KEY` is set. Toggle it from the 👀
   menu, or set `WAKE_WORD` / `WAKE_WORD_ENABLED` in `.env`.
 
+### Jarvis: have it done for you
+
+Say **"Hey Jarvis"** (or type `Jarvis, …` in the prompt, or pick *Jarvis* in the 👀 menu) and
+the orb turns gold. "Hey Friday" switches back.
+
+- **Do a learned task:** "Jarvis, code this invoice." He matches it to a skill Friday has
+  learned, asks for anything that changes from case to case ("Which cost center, sir? The rule
+  is equipment over five thousand euros goes to 0400."), tells you what he's about to do, and
+  waits for your **yes**. Then he does it: the orb's cursor flies to each button just before he
+  clicks it, so you can see exactly what he's doing. Or open the **Skills Hub** and press
+  **Have Jarvis do it**.
+- **Open files and apps:** "Jarvis, open the Q3 budget spreadsheet", "open Safari". He finds it
+  with Spotlight; if a few files match, he asks which one.
+- **Press a button:** "Jarvis, click Share."
+- "How do I…" questions go to Friday, since that's learning rather than doing.
+
+**Safety.** Jarvis is careful by design:
+
+- He only does skills he was taught. He never improvises a procedure.
+- Nothing happens until you say yes to his summary. A skip, silence or "hmm" counts as no.
+- Anything hard to undo or that reaches other people (send, delete, pay, submit, publish,
+  approve, quit…), and any step where the expert said "stop and ask", needs its own yes,
+  every time.
+- He never types passwords, card numbers or codes. He asks you to fill those in yourself.
+- If he can't find something, he asks you to click it rather than guessing. If a field doesn't
+  show what he typed, he asks before carrying on.
+- **Stop him at any moment:** press **Esc**, say "stop", click the orb, press **Stop** in his
+  bubble, or just click somewhere yourself.
+- He only opens files in your home folder and apps from your Applications folders. He won't
+  open anything that runs code (scripts, installers, `.command` files, apps in Downloads) or
+  anything in hidden folders or `~/Library`.
+- Every run is logged next to the skill in `runs/` (what he asked, what he clicked, how it ended).
+
+Jarvis needs `ANTHROPIC_API_KEY` for tasks (opening files and pressing buttons don't). The
+first time he clicks or types, macOS may ask again for Accessibility and Automation → System
+Events for your terminal app.
+
 ### Teach it a task (the apprentice)
 
 Type `teach: <what you're about to do>` in the prompt, or pick *Teach me a task…* from the
@@ -89,6 +136,9 @@ All keys go in `.env`. See [`.env.example`](.env.example).
 | `ANTHROPIC_API_KEY` | Optional | Step-by-step walkthroughs with Claude (Opus 5.5). Without it, the buddy only finds buttons by name. |
 | `OPENAI_API_KEY` | Not used yet | Reserved for anything else you want to add. |
 | `VOICE_ENABLED` | Optional | `0` mutes the buddy. |
+| `JARVIS_VOICE_ID` | Optional | Jarvis's ElevenLabs voice (defaults to "George", British). Without a key, the Mac's "Daniel" voice. |
+| `JARVIS_WAKE_WORD` | Optional | Defaults to `jarvis`. |
+| `JARVIS_ADDRESS` | Optional | How Jarvis addresses you: `sir` (default), `ma'am`, your name, or `none`. |
 
 Keys are only used in the main process and are never sent to the page.
 For the packaged app, put `.env` in `~/Library/Application Support/Project Stark/`
@@ -129,6 +179,11 @@ orb squeezes out a droplet → spark flies over → becomes the cursor, ring + v
   events, matches clicks (from a global input hook, `uiohook-napi`) to the element under the
   pointer, and decides when you've paused. `src/apprentice.js` asks Claude for questions and
   the Work Map; `src/workmap-page.js` renders the tutorial page.
+- `src/jarvis.js` is Jarvis: Claude reads a learned skill once to work out which values to
+  ask for and what to confirm (saved as `jarvis.json` next to it), then `JarvisRun` carries out
+  the replay plan with the safety checks above. `src/act.js` (with `src/jxa/act.js`) does the
+  clicking and typing; `src/files.js` finds and safely opens files; `src/persona.js` holds both
+  agents' names, voices and phrases.
 - `src/guide.js` runs walkthroughs: each turn sends Claude your goal and a numbered list of
   on-screen elements, and gets back one step (what to say, which element to point at).
   `main.js` then watches a cheap screen fingerprint (windows, focus, open menu) to know

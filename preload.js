@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('buddy', {
-  ask: (text) => ipcRenderer.invoke('ask', text),
+  ask: (text, agent) => ipcRenderer.invoke('ask', text, agent),
+  setAgent: (agent) => ipcRenderer.send('set-agent', agent),
+  jarvisStop: () => ipcRenderer.send('jarvis-stop'),
   confirm: (text) => ipcRenderer.invoke('confirm', text),
   speak: (text) => ipcRenderer.invoke('speak', text),
   setInteractive: (on) => ipcRenderer.send('set-interactive', on),
@@ -18,7 +20,7 @@ contextBridge.exposeInMainWorld('buddy', {
   transcribe: (wav) => ipcRenderer.invoke('transcribe', wav),
   openHub: () => ipcRenderer.send('open-hub'),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

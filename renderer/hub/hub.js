@@ -43,6 +43,7 @@ function select(id) {
   if (current.confirmed) bits.push('confirmed by the expert');
   $('meta').textContent = bits.join(' · ');
   $('open').disabled = !current.page;
+  $('run').disabled = !current.page;
   $('frame').src = current.page || 'about:blank';
 }
 
@@ -55,6 +56,7 @@ async function load(selectId) {
 $('search').addEventListener('input', renderList);
 $('teach').addEventListener('click', () => window.hub.teach());
 $('open').addEventListener('click', () => current && window.hub.openExternal(current.id));
+$('run').addEventListener('click', () => current && current.page && window.hub.run(current.id));
 $('reveal').addEventListener('click', () => current && window.hub.reveal(current.id));
 $('delete').addEventListener('click', async () => {
   if (!current || !confirm(`Delete "${current.title}"? It goes to the Trash.`)) return;
