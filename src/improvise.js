@@ -20,6 +20,7 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { describeScreen } = require('./guide');
 const { screenContext } = require('./observe');
+const { imageBlock, boxToScreen, POINT_SCHEMA } = require('./vision');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 20;
@@ -39,6 +40,9 @@ Use status "done" only when the screen shows the goal is reached.
 
 Vague words ("this", "it", "that", "here") mean what's on their screen: the front window, the file it has open, the selected text, or the field they're in. Go with the most sensible reading rather than asking.`;
 
+// How to read what's on screen, for both modes: the screenshot first.
+const SEEING = `Each turn you see a screenshot of the front window (when one could be taken): go by it. The numbered list beside it is the app's accessibility description, with exact positions for the controls it describes. To point at or click something, use its target_id when it's in the list (exact); when it isn't (part of a picture, a canvas, something the app doesn't describe), give action.point instead: its bounding box in the screenshot's own pixels (x, y from the top left, w, h) with a short label, and target_id null. Otherwise point is null.`;
+
 const SCREEN_FORMAT = `Each turn you get what happened since your last step, then a numbered list of what's visible on screen, from macOS accessibility. Every line looks like:
   id | role | "label" | app | x,y
 The list is front window first. Items under an open menu appear only while that menu is open.`;
@@ -50,6 +54,8 @@ ${HONESTY}
 
 ${SCREEN_FORMAT}
 
+${SEEING}
+
 Reply with status "step" and the single next thing to do: target_id is the element to point at (from the current list, or null if it isn't on screen; then say how to get to it), and say is one short, friendly sentence (under 25 words), spoken aloud, so no markdown, ids or coordinates. action.kind is "point" (or "none" with no target). On your first reply, summary is one short sentence on what you'll help them do; otherwise "".`;
 }
 
@@ -60,6 +66,8 @@ function doSystem(address) {
 ${HONESTY}
 
 ${SCREEN_FORMAT}
+
+${SEEING}
 
 Reply with status "step" and the single next action:
 - "click": target_id of the element to click.
@@ -99,8 +107,9 @@ const SCHEMA = {
         target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
         text: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         folder: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        point: POINT_SCHEMA,
       },
-      required: ['kind', 'target_id', 'text', 'folder'],
+      required: ['kind', 'target_id', 'text', 'folder', 'point'],
       additionalProperties: false,
     },
   },
@@ -123,10 +132,15 @@ class Improviser {
   // text) are trimmed: the latest ones are what matter.
   messages() {
     const out = [];
+    const last = this.turns.length - 1;
     this.turns.forEach((t, i) => {
       const recent = i >= this.turns.length - KEEP_SCREENS;
       const note = recent || t.note.length <= 2500 ? t.note : `${t.note.slice(0, 2500)}\n…(trimmed)`;
-      out.push({ role: 'user', content: `${note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}` });
+      const text = `${note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}`;
+      // Only the latest screenshot is sent: older ones cost tokens and are out of date.
+      if (i === last && t.image) {
+        out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `Screenshot: ${t.image.width}×${t.image.height} pixels.\n${text}` }] });
+      } else out.push({ role: 'user', content: t.image ? `${text}\n(screenshot from then omitted)` : text });
       if (t.reply) out.push({ role: 'assistant', content: t.reply });
     });
     return out;
@@ -134,7 +148,8 @@ class Improviser {
 
   // One turn: what happened, then the current screen -> the next step.
   // Returns { status, say, summary, kind, target, text }.
-  async next(note, scan) {
+  // image (optional): a screenshot of the front window for this turn.
+  async next(note, scan, image = null) {
     if (this.inFlight) throw Object.assign(new Error('A step is already in progress.'), { busy: true });
     if (this.turns.length >= MAX_TURNS) {
       return { status: 'needs_teaching', say: "That's taking far more steps than it should, so I'll stop here. This one is worth teaching properly.", summary: '', kind: 'none', target: null, text: null };
@@ -143,7 +158,7 @@ class Improviser {
     try {
       const screen = describeScreen(scan && scan.elements ? scan.elements : []);
       this.chosen = screen.chosen;
-      const turn = { note: `${note}${scan && scan.app ? `\nIn front of them: ${screenContext(scan)}` : ''}`, screen: screen.text || '(nothing readable on screen)', reply: null };
+      const turn = { note: `${note}${scan && scan.app ? `\nIn front of them: ${screenContext(scan)}` : ''}`, screen: screen.text || '(nothing readable on screen)', image, reply: null };
       this.turns.push(turn);
       let response;
       try {
@@ -172,7 +187,7 @@ class Improviser {
       }
       const a = r.action || {};
       const target = Number.isInteger(a.target_id) ? this.chosen[a.target_id] || null : null;
-      return { status: r.status, say: r.say || '', summary: r.summary || '', kind: a.kind || 'none', target, text: a.text == null ? null : String(a.text), folder: a.folder == null ? null : String(a.folder) };
+      return { status: r.status, say: r.say || '', summary: r.summary || '', kind: a.kind || 'none', target, point: target ? null : a.point || null, text: a.text == null ? null : String(a.text), folder: a.folder == null ? null : String(a.folder) };
     } finally {
       this.inFlight = false;
     }
@@ -192,8 +207,9 @@ class Improviser {
 //   ask(text)       a question for the user -> their answer ('' if skipped)
 //   thinking()      show that she's working out the next step
 class ImprovisedWalkthrough {
-  constructor({ goal, history = '', brain, scan, fingerprint, emit, ask, thinking = () => {}, pollMs = 500, idleMs = 1200, giveUpMs = 180000 }) {
-    Object.assign(this, { goal, history, brain, scanFn: scan, fingerprint, emit, ask, thinking, pollMs, idleMs, giveUpMs });
+  //   snap(scan)      a screenshot of the front window, or null
+  constructor({ goal, history = '', brain, scan, snap = async () => null, fingerprint, emit, ask, thinking = () => {}, pollMs = 500, idleMs = 1200, giveUpMs = 180000 }) {
+    Object.assign(this, { goal, history, brain, scanFn: scan, snap, fingerprint, emit, ask, thinking, pollMs, idleMs, giveUpMs });
     this.running = false;
     this.inputAt = 0;
     this.skipped = false;
@@ -225,7 +241,11 @@ class ImprovisedWalkthrough {
         this.thinking();
         const s = await this.scanFn();
         if (!this.running) return;
-        const r = await this.brain.next(note, s && !s.error ? s : { elements: [] });
+        const seen = s && !s.error ? s : { elements: [] };
+        const image = await this.snap(seen).catch(() => null);
+        const r = await this.brain.next(note, seen, image);
+        // Something only the screenshot shows: point at that spot.
+        if (!r.target && r.point && image) r.target = boxToScreen(r.point, image, image.frame);
         if (!this.running) return;
         const first = this.steps === 0;
 

@@ -1,17 +1,17 @@
-// Looking at the screen, only when the accessibility description isn't enough.
+// Seeing the screen through screenshots.
 //
-// Normally Friday and Jarvis read the screen as text through accessibility:
-// exact, private, no screen recording. That's blind to pictures (diagrams,
-// photos, charts, design canvases, games). So when it's needed, and only then,
-// they take one screenshot of the front window (the orb hidden) and ask Claude
-// about it, getting back an answer and a box to point at. needsVision() decides
-// when; the reason is always logged.
+// By default (SCREEN_MODE=always) every Claude turn gets a screenshot of the
+// front window (the orb kept out by content protection), plus accessibility's
+// list of controls, which gives exact positions for what it describes. In
+// SCREEN_MODE=smart, needsVision() decides when a look is worth it. Every look
+// is logged with its reason.
 //
-// A screenshot is only ever used to answer and to point, never to click: its
-// positions are estimates, not the exact frames accessibility gives.
+// Screenshot positions are estimates: they're fine for pointing, but a click
+// only goes to an element accessibility confirms at that spot (elementAtPoint).
 
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { screenContext } = require('./observe');
+const { describeScreen } = require('./guide');
 
 const MODEL = 'claude-opus-5-5';
 const RECENT_MS = 2 * 60 * 1000; // follow-ups about something seen keep looking for this long
@@ -41,11 +41,25 @@ function needsVision({ text, scan, recent = null, missed = false, now = Date.now
   return { need: false, why: '' };
 }
 
+// A box on the screenshot, in its own pixels.
+const POINT_SCHEMA = {
+  anyOf: [
+    {
+      type: 'object',
+      properties: { x: { type: 'integer' }, y: { type: 'integer' }, w: { type: 'integer' }, h: { type: 'integer' }, label: { type: 'string' } },
+      required: ['x', 'y', 'w', 'h', 'label'],
+      additionalProperties: false,
+    },
+    { type: 'null' },
+  ],
+};
+
 const SCHEMA = {
   type: 'object',
   properties: {
     kind: { type: 'string', enum: ['answer', 'task'] },
     say: { type: 'string' },
+    target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     point: {
       anyOf: [
         {
@@ -58,7 +72,7 @@ const SCHEMA = {
       ],
     },
   },
-  required: ['kind', 'say', 'point'],
+  required: ['kind', 'say', 'target_id', 'point'],
   additionalProperties: false,
 };
 
@@ -70,16 +84,17 @@ const VOICES = {
 function system(voice) {
   return `${voice}
 
-You're looking at a screenshot of the front window on their Mac, because what they asked needs seeing (a diagram, picture, chart, canvas, or something the app doesn't describe as text). Vague words ("this", "it", "that box") mean what's on screen.
+You can see a screenshot of the front window on their Mac: that's what to go by. You also get the app's accessibility list (numbered lines "id | role | "label" | app | x,y", in screen points), which gives exact positions for the controls it describes but says nothing about pictures. Vague words ("this", "it", "that box") mean what's on screen.
 
-- kind "answer": answer in one to three short spoken sentences (no markdown or coordinates). If you're talking about a particular part of the image (a box in a diagram, a bar in a chart, a button), point at it: point is its bounding box in the screenshot's own pixels (x, y from the top left, w, h), tight around it, with a short label. Otherwise point is null. Only point at something you can actually see; if it isn't there, say so.
-- kind "task": they want something done rather than explained or shown. say "" and point null.`;
+- kind "answer": answer in one to three short spoken sentences (no markdown or coordinates). If you're talking about a particular thing on screen, point at it: if it's in the list (a button, a field, a link, a menu), give its target_id, which is exact; otherwise (a part of a picture, a diagram, a chart, anything not in the list) give point, its bounding box in the screenshot's own pixels (x, y from the top left, w, h), tight around it, with a short label. Use at most one of the two; both null if there's nothing to point at. Only point at something you can actually see; if it isn't there, say so.
+- kind "task": they want something done or walked through step by step rather than explained or shown. say "" and both null.`;
 }
 
 // image: { data (base64 JPEG), width, height } of the front window only.
 async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', address = '', history = '', client = null }) {
   const c = client || new Anthropic({ apiKey });
   const voice = agent === 'jarvis' ? VOICES.jarvis(address) : VOICES.friday;
+  const list = describeScreen((scan && scan.elements) || []);
   const response = await c.beta.messages.create({
     model: MODEL,
     max_tokens: 2000,
@@ -92,18 +107,32 @@ async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', a
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image.data } },
-          { type: 'text', text: `${history ? `Recent conversation (read the question in light of it; "now the left hand" carries on from what came before):\n${history}\n\n` : ''}They asked: "${question}"\n\nThe screenshot is ${image.width}×${image.height} pixels. What's in front of them: ${screenContext(scan)}` },
+          { type: 'text', text: `${history ? `Recent conversation (read the question in light of it; "now the left hand" carries on from what came before):\n${history}\n\n` : ''}They asked: "${question}"\n\nThe screenshot is ${image.width}×${image.height} pixels. What's in front of them: ${screenContext(scan)}\n\nAccessibility list:\n${list.text || '(it describes nothing here)'}` },
         ],
       },
     ],
   });
-  if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', point: null };
+  if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', target: null, point: null };
   try {
     const r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
-    return { kind: r.kind === 'answer' ? 'answer' : 'task', say: r.say || '', point: r.point || null };
+    const target = Number.isInteger(r.target_id) ? list.chosen[r.target_id] || null : null;
+    return { kind: r.kind === 'answer' ? 'answer' : 'task', say: r.say || '', target, point: target ? null : r.point || null };
   } catch {
-    return { kind: 'task', say: '', point: null };
+    return { kind: 'task', say: '', target: null, point: null };
   }
+}
+
+// A screenshot as the image block a message carries.
+const imageBlock = (image) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image.data } });
+
+// What a screenshot box lands on: the smallest element accessibility describes
+// at its centre, if any. A click only ever goes to an element confirmed this way.
+function elementAtPoint(rect, elements) {
+  if (!rect) return null;
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  const hits = (elements || []).filter((e) => !e.hidden && cx >= e.x && cy >= e.y && cx <= e.x + e.w && cy <= e.y + e.h);
+  return hits.sort((a, b) => (a.z || 0) - (b.z || 0) || a.w * a.h - b.w * b.h)[0] || null;
 }
 
 // A box in screenshot pixels -> a rect in screen points, kept inside the window.
@@ -119,4 +148,4 @@ function boxToScreen(point, image, frame) {
   return { x, y, w, h, label: point.label || '' };
 }
 
-module.exports = { needsVision, lookAtScreen, boxToScreen, VISUAL, RECENT_MS };
+module.exports = { needsVision, lookAtScreen, boxToScreen, elementAtPoint, imageBlock, POINT_SCHEMA, VISUAL, RECENT_MS };

@@ -17,6 +17,7 @@ const { Anthropic } = require('@anthropic-ai/sdk');
 const { Replay } = require('./replay');
 const { describeScreen, describeSkill } = require('./guide');
 const { ScreenObserver } = require('./observe');
+const { imageBlock, boxToScreen, POINT_SCHEMA } = require('./vision');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 40;
@@ -24,7 +25,7 @@ const KEEP_SCREENS = 2;
 
 const SYSTEM = `You are Friday, a warm, sharp teacher who lives as a small glowing orb on someone's Mac. You're teaching them a task an expert showed you (the lesson plan below). This is a real lesson, a two-way conversation, not a click-through tutorial.
 
-You can see their screen as an accessibility list (no screenshots): numbered lines "id | role | "label" | app | x,y". You also get a log of what they've done since you last spoke (clicks, typing, windows, where the keyboard is) and, if they spoke, what they said.
+You see their screen two ways: a screenshot of the front window (go by it), and the app's accessibility list, numbered lines "id | role | "label" | app | x,y", which gives exact positions for the controls it describes. You also get a log of what they've done since you last spoke (clicks, typing, windows, where the keyboard is) and, if they spoke, what they said.
 
 How to teach:
 - Keep the goal in mind and the plan as your structure, but adapt to what they actually do.
@@ -40,7 +41,8 @@ How to teach:
 
 Reply:
 - say: what you say out loud, one or two short, natural sentences, no markdown, ids or coordinates. Empty only if there's genuinely nothing worth saying.
-- target_id: an element from the current list to point at, or null.
+- target_id: an element from the current list to point at (exact), or null.
+- point: when what you want to point at isn't in the list (part of a picture, something the app doesn't describe) but you can see it in the screenshot, its bounding box in the screenshot's own pixels with a short label; otherwise null. Use at most one of target_id and point.
 - step_number: the plan step they should be on now (1-based).
 - then: "resume" when they're back on the plan at step_number and the lesson should carry on with it (your say replaces its usual line, so include the instruction); "wait" when you've asked something or they need a moment, and you'll listen.
 - skip_steps: plan steps to leave out from now on (often []).
@@ -51,12 +53,13 @@ const SCHEMA = {
   properties: {
     say: { type: 'string' },
     target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+    point: POINT_SCHEMA,
     step_number: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     then: { type: 'string', enum: ['resume', 'wait'] },
     skip_steps: { type: 'array', items: { type: 'integer' } },
     status: { type: 'string', enum: ['continue', 'done', 'stop'] },
   },
-  required: ['say', 'target_id', 'step_number', 'then', 'skip_steps', 'status'],
+  required: ['say', 'target_id', 'point', 'step_number', 'then', 'skip_steps', 'status'],
   additionalProperties: false,
 };
 
@@ -77,9 +80,13 @@ class Tutor {
 
   messages() {
     const out = [];
+    const last = this.turns.length - 1;
     this.turns.forEach((t, i) => {
       const recent = i >= this.turns.length - KEEP_SCREENS;
-      out.push({ role: 'user', content: `${t.text}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}` });
+      const text = `${t.text}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}`;
+      // Only the latest screenshot goes: older ones cost tokens and are out of date.
+      if (i === last && t.image) out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `Screenshot: ${t.image.width}×${t.image.height} pixels.\n${text}` }] });
+      else out.push({ role: 'user', content: text });
       if (t.reply) out.push({ role: 'assistant', content: t.reply });
     });
     return out;
@@ -99,7 +106,7 @@ class Tutor {
       `Where they are: ${ctx.where || 'unknown'}`,
       (TRIGGERS[ctx.trigger] || ((d) => d))(ctx.detail)
     );
-    const turn = { text: parts.join('\n\n'), screen: screen.text || '(nothing readable on screen)', reply: null };
+    const turn = { text: parts.join('\n\n'), screen: screen.text || '(nothing readable on screen)', image: ctx.image || null, reply: null };
     this.turns.push(turn);
     let response;
     try {
@@ -124,9 +131,11 @@ class Tutor {
     } catch {
       return { say: '', target: null, stepNumber: null, then: 'wait', skipSteps: [], status: 'continue' };
     }
+    const exact = Number.isInteger(r.target_id) ? this.chosen[r.target_id] || null : null;
     return {
       say: r.say || '',
-      target: Number.isInteger(r.target_id) ? this.chosen[r.target_id] || null : null,
+      // Exact from the list, or the spot on the screenshot.
+      target: exact || (r.point && ctx.image ? boxToScreen(r.point, ctx.image, ctx.image.frame) : null),
       stepNumber: Number.isInteger(r.step_number) ? r.step_number : null,
       then: r.then === 'resume' ? 'resume' : 'wait',
       skipSteps: Array.isArray(r.skip_steps) ? r.skip_steps.filter(Number.isInteger) : [],
@@ -145,7 +154,9 @@ class Lesson {
   //   tutor              a Tutor (or a fake in tests)
   //   idleMs             quiet time after an instruction before checking in
   //   offPathDelayMs     how long to let a stray click play out before commenting
-  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, idleMs = 30000, offPathDelayMs = 1500, now = () => Date.now() }) {
+  //   snap(scan)         a screenshot of the front window for a tutor turn, or null
+  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 30000, offPathDelayMs = 1500, now = () => Date.now() }) {
+    this.snap = snap;
     this.skill = skill;
     this.emitOut = emit;
     this.thinking = thinking;
@@ -264,6 +275,7 @@ class Lesson {
     const since = this.lastAskedAt || this.lastSpokeAt - 1;
     this.lastAskedAt = this.now();
     try {
+      const image = await this.snap(this.replay.latest).catch(() => null);
       const r = await this.tutor.turn({
         trigger,
         detail,
@@ -271,6 +283,7 @@ class Lesson {
         where: this.observer.where(),
         lesson: this.replay.where() || {},
         scan: this.replay.latest,
+        image,
       });
       if (this.running) await this.apply(r);
     } catch (err) {

@@ -58,6 +58,9 @@ function loadConfig(userDataDir) {
     // Take a screenshot of the front window when accessibility isn't enough
     // (diagrams, pictures, apps that describe nothing). Needs Screen Recording.
     visionEnabled: get('VISION_ENABLED', '1') !== '0',
+    // "always": every question, pointing request, lesson turn and Jarvis step
+    // sees a screenshot. "smart": only when accessibility isn't enough.
+    screenMode: /^smart$/i.test(get('SCREEN_MODE', 'always')) ? 'smart' : 'always',
     // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
     jarvis: {
       // ElevenLabs "George": a warm, mature British voice.

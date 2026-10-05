@@ -19,9 +19,9 @@ melts back in.
 Ask it *how* to do something ("how do I make a new folder?") and it walks you through it
 step by step with Claude, hopping to the next button each time you click.
 
-Inspired by [Clicky](https://github.com/farzaa/clicky), but it takes no screenshots: it
-reads the real buttons on screen through macOS Accessibility. Finding a button by name
-needs no AI at all; walkthroughs send Claude the list of buttons, not an image.
+Inspired by [Clicky](https://github.com/farzaa/clicky). Claude sees a screenshot of the front
+window every turn, alongside the real buttons macOS Accessibility describes (exact positions).
+Finding a button by its exact name still needs no AI at all.
 
 ![preview](preview.png)
 
@@ -123,8 +123,8 @@ Events for your terminal app.
 When Friday teaches a skill, the lesson plan is her structure, but she teaches like a person
 sitting next to you rather than a click-through tutorial:
 
-- **She sees what you do, without screenshots.** She reads the screen through Accessibility
-  (buttons, fields, values, which window, where you're typing) and pairs your clicks and keys with
+- **She sees what you do.** She gets a screenshot of the front window each time she's asked,
+  plus Accessibility (buttons, fields, values, which window, where you're typing), and pairs your clicks and keys with
   what's under them, so she knows "you clicked Preferences" or "you typed Q3 into Search".
 - **On track, she keeps up instantly.** Do the step and she's onto the next one, no waiting.
 - **Off track, she helps.** "That opened Preferences. Close it, then click Export." Got there
@@ -148,21 +148,24 @@ open, any text you've selected, or the field you're in.
 - **Vague requests pick the skill that fits where you are**, so "how do I export this?" in one app
   goes to the skill for that app.
 
-### Looking at pictures, only when needed
+### Seeing the screen
 
-Reading the screen through accessibility is exact and private, but blind to pictures: diagrams,
-photos, charts, design canvases, games. So Friday and Jarvis take **one screenshot of the front
-window** (with the orb hidden) only when one of these says it's needed:
+Every time Claude is asked something (a question, a lesson turn, a best-effort step, Jarvis
+doing something), it gets **a screenshot of the front window** plus Accessibility's list of
+controls. The screenshot is what it goes by, so diagrams, photos, canvases and apps that describe
+nothing are all fair game; the list gives exact positions for the controls it does describe.
 
-- the question is visual ("where's the database in this diagram?", "which is the red one?")
-- the app describes almost nothing, or a big picture or canvas fills the window
-- accessibility came up empty for what you asked about
-- you're following up on something they just looked at, in the same window
+- **Pointing** works at anything visible: a list control exactly, otherwise a box on the screenshot.
+- **Clicking** only ever goes to a control Accessibility confirms at that spot. If Jarvis sees
+  something but nothing is confirmed there, he points at it and asks you to click.
+- The orb is kept out of screenshots (content protection), only the front window is captured,
+  and the terminal and session log note every look.
+- Saying an exact button name ("where's Export") still points instantly, with no screenshot, and
+  following a taught lesson step by step still runs on Accessibility (no AI while you're on track).
 
-Claude reads the screenshot, answers, and they point at the part they mean. Screenshots are only
-used to answer and point, never to click (their positions are estimates). It needs **Screen
-Recording** permission; without it they say so and go by what apps describe. The terminal and
-the session log note every look and why. Turn it off from the 👀 menu or with `VISION_ENABLED=0`.
+It needs **Screen Recording** permission; without it they say so and go by Accessibility alone.
+Each look adds a second or two and a little cost. `SCREEN_MODE=smart` goes back to looking only
+when Accessibility isn't enough; `VISION_ENABLED=0` (or the 👀 menu) turns screenshots off.
 
 ### Awake or dormant
 

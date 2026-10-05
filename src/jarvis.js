@@ -717,6 +717,9 @@ function relatedText(skill) {
 // Claude isn't confident ("needs_teaching"), at the start or halfway through.
 
 const { cleanUrl } = require('./apprentice');
+const { boxToScreen, elementAtPoint } = require('./vision');
+// What counts as something to click when confirming a screenshot location.
+const CLICKABLE_HERE = new Set(['AXButton', 'AXMenuButton', 'AXPopUpButton', 'AXLink', 'AXTab', 'AXRadioButton', 'AXCheckBox', 'AXMenuItem', 'AXMenuBarItem', 'AXCell', 'AXRow', 'AXDisclosureTriangle', 'AXComboBox', 'AXTextField', 'AXSearchField', 'AXTextArea', 'AXImage', 'AXStaticText']);
 // He never types or presses keys in a terminal: that would be running commands
 // on the Mac. Commands a task needs are given to the user to run themselves.
 const TERMINALS = /^(Terminal|iTerm2?|Warp|Alacritty|kitty|WezTerm|Ghostty|Hyper)$/i;
@@ -730,9 +733,11 @@ class JarvisFreestyle extends JarvisRun {
   //   improviser  an Improviser in 'do' mode (or a fake in tests)
   //   related     optional: a learned skill that may be this task (a "maybe"
   //               match), given to Claude as an expert's reference
-  constructor({ goal, improviser, related = null, history = '', ...deps }) {
+  //   snap(scan)  a screenshot of the front window for each turn, or null
+  constructor({ goal, improviser, related = null, history = '', snap = async () => null, ...deps }) {
     super({ skill: { map: { title: goal, steps: [] }, session: { events: [] } }, actions: [], plan: { can_run: true, inputs: [], actions: [], step_lines: [] }, ...deps });
     this.history = history;
+    this.snap = snap;
     this.goal = goal;
     this.brain = improviser;
     this.ranAnyway = new Set(); // commands to run even though the project is already up
@@ -747,7 +752,10 @@ class JarvisFreestyle extends JarvisRun {
     for (let step = 0; ; step++) {
       this.check();
       const s = await this.scan();
-      const r = await this.brain.next(note, s || { elements: [] });
+      const image = await this.snap(s || { elements: [] }).catch(() => null);
+      this.check();
+      const r = await this.brain.next(note, s || { elements: [] }, image);
+      r.image = image;
       this.check();
       this.record({ kind: 'think', detail: `${r.status} ${r.kind}${r.target ? ` "${r.target.label}"` : ''}${r.text ? ` ${r.text}` : ''}`, value: r.say });
 
@@ -807,6 +815,20 @@ class JarvisFreestyle extends JarvisRun {
     const t = r.target;
     switch (r.kind) {
       case 'click': {
+        // Located only on the screenshot: click it only if accessibility
+        // confirms a real control at that spot. A guessed position is never clicked.
+        if (!t && r.point && r.image) {
+          const spot = boxToScreen(r.point, r.image, r.image.frame);
+          const under = elementAtPoint(spot, ((this.latest && this.latest.elements) || []).filter((e) => CLICKABLE_HERE.has(e.role)));
+          if (!under) {
+            this.emit({ type: 'point', target: spot });
+            await this.handOff(`I can see "${r.point.label}" but can't be sure of clicking it precisely{sir}. Would you click it for me?`);
+            return `The user clicked "${r.point.label}" for you.`;
+          }
+          this.record({ kind: 'located', detail: `"${r.point.label}" on the screenshot is "${under.label}"` });
+          r.target = under;
+          return this.doStep(r);
+        }
         if (!t) throw new Error('there was nothing to click');
         if (riskOf({ kind: 'click', label: t.label }) && !(await this.confirm(this.s(`That will press "${t.label}". Shall I go ahead{sir}?`)))) {
           this.stop('declined');

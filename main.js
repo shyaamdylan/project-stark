@@ -90,6 +90,8 @@ function createWindow() {
   });
 
   win.setAlwaysOnTop(true, 'screen-saver');
+  // Keep the orb out of screenshots (ours and screen sharing) without hiding it.
+  win.setContentProtection(true);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   // Everything the orb says or points at goes in the session log (text mode prints its own).
@@ -320,8 +322,17 @@ async function ask(text) {
     const res = await screenAnswer(text, scan, 'friday');
     if (res) return res;
   }
+  // Looking at the screen for every question and "show me": a button named
+  // exactly as said is pointed at straight away; anything else is answered
+  // from a screenshot (exact positions still used where the app gives them).
+  if (canGuide && alwaysLook() && (!looksLikeTask(text) || follow)) {
+    const quick = exactlyNamed(text, scan);
+    if (quick) return quick;
+    const res = await visualAnswer(text, scan, 'friday', 'every question is looked at');
+    if (res) return res;
+  }
   // A picture, a diagram, an app that describes nothing: look before answering.
-  if (canGuide && !looksLikeTask(text)) {
+  if (canGuide && !alwaysLook() && !looksLikeTask(text)) {
     const res = await lookIfNeeded(text, scan, 'friday');
     if (res) return res;
   }
@@ -421,9 +432,7 @@ async function captureFront(scan) {
   if (!frame || !frame.w || !frame.h) return null;
   const display = screen.getDisplayMatching({ x: Math.round(frame.x), y: Math.round(frame.y), width: Math.round(frame.w), height: Math.round(frame.h) });
   const sf = display.scaleFactor || 1;
-  if (win) win.setOpacity(0);
   try {
-    await new Promise((r) => setTimeout(r, 80)); // let the overlay disappear first
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.bounds.width * sf), height: Math.round(display.bounds.height * sf) } });
     const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
     if (!src || src.thumbnail.isEmpty()) return null;
@@ -444,8 +453,41 @@ async function captureFront(scan) {
     const size = shot.getSize();
     return { data: shot.toJPEG(80).toString('base64'), width: size.width, height: size.height, frame };
   } finally {
-    if (win) win.setOpacity(1);
+    // (The overlay is content-protected, so it never appears in the capture.)
   }
+}
+
+// Every request looks at the screen, unless set to "smart" (only when needed).
+const alwaysLook = () => visionAllowed() && cfg.screenMode === 'always';
+
+// A screenshot for a lesson or best-effort turn, or null (no permission, turned
+// off). One capture per moment: turns close together share it.
+let lastSnap = null; // { key, at, image }
+async function snap(scan) {
+  if (!alwaysLook() || !scan || scan.error || !scan.frame) return null;
+  const key = `${scan.app}|${scan.window || ''}|${scan.frame.x},${scan.frame.y},${scan.frame.w},${scan.frame.h}`;
+  if (lastSnap && lastSnap.key === key && Date.now() - lastSnap.at < 1200) return lastSnap.image;
+  let image = null;
+  try {
+    image = await captureFront(scan);
+  } catch (err) {
+    console.error('[vision] capture', err.message);
+  }
+  if (image && image.denied) {
+    tellNoScreenRecording();
+    return null;
+  }
+  if (image) lastSnap = { key, at: Date.now(), image };
+  return image;
+}
+
+// Say once (every 10 minutes at most) that screenshots need permission, and open it.
+function tellNoScreenRecording() {
+  if (Date.now() - visionPermissionToldAt < 10 * 60 * 1000) return;
+  visionPermissionToldAt = Date.now();
+  console.log("[vision] Screen Recording isn't allowed: going by accessibility only");
+  shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  if (win) win.webContents.send('say', { text: persona(agent, cfg).s("To see your screen I need Screen Recording permission{sir}. I've opened the setting; until then I'll go by what apps describe."), mood: 'worried' });
 }
 
 // Look, answer and point. Returns a reply, or null to carry on without it.
@@ -461,11 +503,7 @@ async function visualAnswer(text, scan, who, why) {
   }
   if (image && image.denied) {
     console.log(`[vision] wanted to look (${why}) but Screen Recording isn't allowed`);
-    if (Date.now() - visionPermissionToldAt > 10 * 60 * 1000) {
-      visionPermissionToldAt = Date.now();
-      shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
-      if (win) win.webContents.send('say', { text: p.s("To see pictures and diagrams I'd need Screen Recording permission{sir}. I've opened the setting; until then I'll go by what apps describe."), mood: 'worried' });
-    }
+    tellNoScreenRecording();
     return null;
   }
   if (!image) return null;
@@ -480,6 +518,8 @@ async function visualAnswer(text, scan, who, why) {
   lastLook = { key: `${scan.app}|${scan.window || ''}`, at: Date.now() };
   console.log(`[vision] → ${r.kind}${r.point ? ` (pointing at "${r.point.label}")` : ''}`);
   if (r.kind !== 'answer' || !r.say) return null;
+  // Exact when it's something accessibility describes; the screenshot spot otherwise.
+  if (r.target && !r.target.hidden) return { ok: true, label: r.target.label, role: ROLE_NAMES[r.target.role] || 'thing', rect: toLocal(r.target), say: r.say, looked: true };
   const rect = boxToScreen(r.point, image, image.frame);
   if (rect) return { ok: true, label: rect.label, role: 'part', rect: toLocal(rect), say: r.say, looked: true };
   return { ok: true, sayOnly: true, say: r.say, looked: true };
@@ -490,6 +530,16 @@ async function lookIfNeeded(text, scan, who, { missed = false } = {}) {
   if (!visionAllowed()) return null;
   const d = needsVision({ text, scan, recent: lastLook, missed });
   return d.need ? visualAnswer(text, scan, who, d.why) : null;
+}
+
+// "Share", "where's the export button": a visible control named exactly as
+// said. Pointed at instantly, no screenshot or Claude needed.
+function exactlyNamed(text, scan) {
+  if (text.split(/\s+/).length > 6) return null;
+  const r = findBest(text, scan.elements);
+  if (!r.match || r.match.hidden || r.score < 0.95) return null;
+  const m = r.match;
+  return { ok: true, label: m.label, role: ROLE_NAMES[m.role] || 'thing', app: m.app || scan.app, rect: toLocal(m), say: `There's the "${m.label}" ${ROLE_NAMES[m.role] || ''}!`.replace(' !', '!') };
 }
 
 // Worth a look when accessibility found nothing: questions and "where/show me" requests, not chit-chat.
@@ -738,6 +788,7 @@ async function beginSkill(id, text) {
     plan,
     scan: scanFrontWindow,
     tutor: new Tutor(cfg.anthropicApiKey, skill),
+    snap,
     emit: (step) => {
       if (replay !== r) return;
       console.log(`[lesson] step ${step.stepNumber || '-'}/${step.totalSteps}${step.chat ? ' (tutor)' : ''}:`, step.status, step.target ? step.target.label : '', step.say ? `- ${step.say}` : '');
@@ -807,6 +858,7 @@ function startImprovGuide(goal) {
     history: turnHistory,
     brain,
     scan: scanFrontWindow,
+    snap,
     fingerprint: screenFingerprint,
     ask: (text) => askUser(text, 'live'),
     thinking: () => win && win.webContents.send('guide-thinking'),
@@ -1094,8 +1146,10 @@ async function askJarvis(raw) {
   // "What does this do?": answered from what's on screen.
   if (Guide.available(cfg) && !moreToDo) {
     const { scan: seen } = await looking;
-    // A picture, a diagram, an app that describes nothing: look before answering.
-    const looked = seen ? await lookIfNeeded(text, seen, 'jarvis') : null;
+    // Questions and "show me" look at the screen (always mode); a picture, a
+    // diagram, an app that describes nothing gets a look either way.
+    const asking = isScreenQuestion(text) || SHOW_ME.test(text);
+    const looked = !seen ? null : alwaysLook() && asking ? await visualAnswer(text, seen, 'jarvis', 'every question is looked at') : await lookIfNeeded(text, seen, 'jarvis');
     if (looked) return looked;
     if (isScreenQuestion(text)) {
       const res = seen ? await screenAnswer(text, seen, 'jarvis') : null;
@@ -1152,6 +1206,7 @@ function beginFreestyle(goal, related = null) {
   const run = new JarvisFreestyle({
     goal,
     history: turnHistory,
+    snap,
     related,
     improviser: new Improviser(cfg.anthropicApiKey, { mode: 'do', address: cfg.jarvis.address }),
     s: p.s,
