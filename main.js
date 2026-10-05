@@ -22,6 +22,8 @@ const { readTextFile, resolveFile, findFiles, isClear, parseQuery, appRoots, set
 const windows = require('./src/windows');
 const { correctNames, knownNames } = require('./src/names');
 const sessionLog = require('./src/sessionlog');
+const { answerAboutScreen, isScreenQuestion } = require('./src/screenqa');
+const { screenContext } = require('./src/observe');
 const act = require('./src/act');
 const textMode = require('./src/textmode');
 const runProject = require('./src/runproject');
@@ -277,8 +279,13 @@ async function ask(text) {
 
   stopGuide();
   const canGuide = Guide.available(cfg);
+  // "What does this do?": a question about what's in front of them, answered from the screen.
+  if (canGuide && isScreenQuestion(text)) {
+    const res = await screenAnswer(text, scan, 'friday');
+    if (res) return res;
+  }
   if (canGuide && looksLikeTask(text)) {
-    const res = await startGuide(text, scan);
+    const res = await startGuide(text, scan, null, scan);
     if (res.reason !== 'not-learned') return res;
     // Not a learned skill: it may still be one obvious button on screen...
     const one = await locateOnScreen(text, scan);
@@ -320,6 +327,22 @@ async function ask(text) {
 // recorded path, and even then only within the learned skill.
 
 let replay = null;
+
+// Answer a question about the screen, pointing at what it's about. Returns null
+// when they actually want something done, so the request carries on as a task.
+async function screenAnswer(text, scan, who) {
+  let r;
+  try {
+    r = await answerAboutScreen(cfg.anthropicApiKey, { question: text, scan, agent: who, address: cfg.jarvis.address });
+  } catch (err) {
+    console.error('[screen question]', err.message);
+    return null;
+  }
+  console.log(`[screen question] "${text}" → ${r.kind}${r.target ? ` (pointing at "${r.target.label}")` : ''}`);
+  if (r.kind !== 'answer' || !r.say) return null;
+  if (r.target && !r.target.hidden) return { ok: true, label: r.target.label, role: ROLE_NAMES[r.target.role] || 'thing', rect: toLocal(r.target), say: r.say };
+  return { ok: true, sayOnly: true, say: r.say };
+}
 
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
@@ -469,7 +492,7 @@ function stepPayload(step) {
 
 // Walkthroughs only ever follow a skill it has been taught. If none matches,
 // say so (or fall back to `otherwise`) rather than improvising a procedure.
-async function startGuide(text, scan, otherwise = null) {
+async function startGuide(text, scan, otherwise = null, screen = scan) {
   const notLearned = otherwise || {
     ok: false,
     reason: 'not-learned',
@@ -477,7 +500,7 @@ async function startGuide(text, scan, otherwise = null) {
   };
   let found;
   try {
-    found = await matchSkill(text);
+    found = await matchSkill(text, screen);
   } catch (err) {
     console.error('[guide] skill lookup', err.message);
     return { ok: false, reason: 'guide', say: "I couldn't check that just now." };
@@ -493,10 +516,12 @@ async function startGuide(text, scan, otherwise = null) {
 
 // Which learned skill (if any) a request is for. Only asks Claude when the
 // request shares a real word with something it has learned.
-async function matchSkill(text) {
+// `scan` (if known) says what's on screen, so a vague request ("export this")
+// goes to the skill that fits where they are.
+async function matchSkill(text, scan = null) {
   const skills = learnedSkills().filter((sk) => sharesWords(text, `${sk.title} ${sk.summary}`));
   if (!skills.length) return null;
-  const found = await findSkill(cfg.anthropicApiKey, text, skills);
+  const found = await findSkill(cfg.anthropicApiKey, text, skills, scan ? screenContext(scan) : '');
   console.log(`[skills] "${text}" → ${found.id || 'none'} (${found.match})`);
   return found;
 }
@@ -774,6 +799,8 @@ const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|d
 const FILEISH = /\.\w{1,5}\b|\b(file|folder|document|doc|readme|pdf|spreadsheet|sheet|deck|slides|presentation|screenshot|photo|image|video|notes?)\b/i;
 // "…and then run it", "…and use it to…": a second job after the first.
 const MORE_TO_DO = /\b(and then|then (?:use|run|put|start|get|do|make|send|fill|type|click|copy)|after that|and (?:use|run|put|start|get|make|send|fill|type|copy|follow|install|set)\b)/i;
+// "Open this in Preview", "show this in Finder", "where is this saved".
+const THIS_FILE_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(open|show|reveal|find|where(?:'s| is))\s+(?:this|it|that)(?:\s+(?:file|document|doc|one|pdf|image|picture|photo))?(?:\s+(?:saved|stored|kept))?(?:\s+(?:in|with|using)\s+([\w .-]+?))?(?:\s+for me)?(?:\s+please)?[?.!]?$/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
 // "Switch to the budget spreadsheet": an open window or tab, brought to the front.
 const SWITCH_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:switch(?: back)? to|go(?: back)? to|bring (?:up|back)|focus(?: on)?|jump to|take me to|show me|get me|pull up|flip to|change to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:window|tab))?(?:\s+for me)?(?:\s+please)?$/i;
@@ -853,6 +880,13 @@ async function askJarvis(raw) {
     return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me do that{sir}. Check Accessibility and Automation in Privacy and Security.") };
   }
 
+  // "Open this in Preview", "where's this saved?": this = the file the front window has open.
+  const thisFile = THIS_FILE_RE.exec(text);
+  if (thisFile) {
+    const res = await thisFileRequest(thisFile, p);
+    if (res) return res;
+  }
+
   // Quick routes are for one thing ("open the README"). "Read the README and
   // then run it" is a task with more to it: that's for the best-effort path.
   const moreToDo = MORE_TO_DO.test(text);
@@ -888,11 +922,17 @@ async function askJarvis(raw) {
 
   // The skill lookup (Claude) and the screen scan don't depend on each other: do both at once.
   const looking = scanForAsk();
+  // "What does this do?": answered from what's on screen.
+  if (Guide.available(cfg) && isScreenQuestion(text)) {
+    const { scan: seen } = await looking;
+    const res = seen ? await screenAnswer(text, seen, 'jarvis') : null;
+    if (res) return res;
+  }
   let relatedSkill = null;
   if (Guide.available(cfg)) {
     let found = null;
     try {
-      found = await matchSkill(text);
+      found = await matchSkill(text, (await looking).scan);
     } catch (err) {
       console.error('[jarvis] skill lookup', err.message);
     }
@@ -1082,6 +1122,33 @@ async function openFileRequest(what, p, { reveal = false } = {}) {
   }
   console.log(`[jarvis] opened ${pick.path}${appPath ? ` in ${appPath}` : ''}`);
   return { ok: true, sayOnly: true, say: p.s(`Opening ${nice}${appPath ? ` in ${withApp}` : ''}{sir}.`) };
+}
+
+// "This file" is whatever the front window has open (macOS tells us its path).
+async function thisFileRequest(m, p) {
+  let scan;
+  try {
+    scan = await scanFrontWindow();
+  } catch {
+    return null;
+  }
+  const doc = scan && scan.document;
+  if (!doc || !fs.existsSync(doc)) return null; // nothing open as a file: try it as something else
+  const name = path.basename(doc).replace(/\.[^.]+$/, '');
+  const verb = m[1].toLowerCase();
+  if (verb !== 'open' || /finder/i.test(m[2] || '')) {
+    shell.showItemInFolder(doc);
+    return { ok: true, sayOnly: true, say: p.s(`${name} is ${whereIs(doc)}{sir}. I've shown it to you in Finder.`) };
+  }
+  const withApp = m[2] && m[2].trim();
+  const appPath = withApp && appRoots(app.getPath('home')).map((d) => path.join(d, `${path.basename(withApp).replace(/\b\w/g, (c) => c.toUpperCase())}.app`)).find((x) => fs.existsSync(x));
+  if (withApp && !appPath) return { ok: false, reason: 'not-found', say: p.s(`I can't find ${withApp} in your Applications{sir}.`) };
+  const err = appPath
+    ? await new Promise((resolve) => execFile('/usr/bin/open', ['-a', appPath, doc], (e) => resolve(e ? e.message : '')))
+    : await shell.openPath(doc);
+  if (err) return { ok: false, reason: 'error', say: p.s(`I couldn't open ${name}{sir}.`) };
+  console.log(`[jarvis] opened the front document ${doc}${appPath ? ` in ${appPath}` : ''}`);
+  return { ok: true, sayOnly: true, say: p.s(`Opening ${name}${appPath ? ` in ${withApp}` : ''}{sir}.`) };
 }
 
 // Jarvis's plan for a skill (which values to ask for, what to confirm), made once.

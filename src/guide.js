@@ -174,7 +174,7 @@ async function planReplay(apiKey, skill) {
 // Which learned skill (if any) is the user asking for?
 // Returns { id, match: 'yes' | 'maybe' | 'no', question }. For 'maybe', question
 // is a short yes/no question that checks they mean the learned task.
-async function findSkill(apiKey, request, skills) {
+async function findSkill(apiKey, request, skills, onScreen = '') {
   const none = { id: null, match: 'no', question: '' };
   if (!skills.length) return none;
   const client = new Anthropic({ apiKey });
@@ -189,8 +189,9 @@ async function findSkill(apiKey, request, skills) {
 - "yes": the request is clearly that task (different wording is fine).
 - "maybe": it could plausibly be that task but something is unclear (it's broader or narrower, or a detail is missing). Write one yes/no question, under 15 words, that checks they mean exactly the learned task, naming its key detail. Example: learned "transcribe a piano piece from a YouTube video in PianoScribe", request "transcribe a YouTube video" -> "Is it a piano piece you want, in PianoScribe?"
 - "no": it's a different task. Never stretch a skill to cover something else.
+- A vague request ("export this", "do the usual here") is about what's on their screen: prefer the task that fits where they are.
 Use question "" unless match is "maybe".`,
-    messages: [{ role: 'user', content: `Learned tasks:\n${list}\n\nRequest: "${request}"` }],
+    messages: [{ role: 'user', content: `Learned tasks:\n${list}\n\nRequest: "${request}"${onScreen ? `\nOn their screen right now: ${onScreen}` : ''}` }],
   });
   if (response.stop_reason !== 'end_turn') return none;
   const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');

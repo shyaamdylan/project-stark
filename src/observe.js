@@ -109,13 +109,22 @@ class ScreenObserver {
     return this.log.filter((e) => e.t > since).map((e) => e.text);
   }
 
-  // Where they are and where the keyboard is, in a line.
+  // Where they are, the file open, where the keyboard is, any selection, in a line.
   where() {
-    const s = this.latest;
-    if (!s) return 'unknown';
-    const f = s.focused;
-    return `${s.app}${s.window ? ` — "${short(s.window)}"` : ''}${f && f.label ? `; typing in ${word(f.role)} "${short(f.label)}"${f.value ? ` (holds "${short(f.value)}")` : ''}` : ''}`;
+    return screenContext(this.latest);
   }
 }
 
-module.exports = { ScreenObserver, word };
+// What "this" most likely means right now, in a line: the front app and
+// window, the file it has open, where the keyboard is, and any selected text.
+function screenContext(scan) {
+  if (!scan || scan.error) return 'unknown';
+  const f = scan.focused;
+  const bits = [`${scan.app || 'unknown app'}${scan.window ? ` — "${short(scan.window)}"` : ''}`];
+  if (scan.document) bits.push(`the file open in it is ${scan.document}`);
+  if (f && f.label) bits.push(`typing in ${word(f.role)} "${short(f.label)}"${f.value ? ` (holds "${short(f.value)}")` : ''}`);
+  if (scan.selection) bits.push(`selected text: "${scan.selection}"`);
+  return bits.join('; ');
+}
+
+module.exports = { ScreenObserver, word, screenContext };

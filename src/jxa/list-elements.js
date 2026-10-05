@@ -535,6 +535,13 @@ function run(argv) {
   var fe = safe(function () { return getAttr(front.el, 'AXFocusedUIElement'); }, null);
   var fen = isNil(fe) ? null : node(fe);
   var focused = fen ? { role: fen.role, label: str(fen.title || fen.desc || fen.placeholder || fen.help), value: fen.value ? str(fen.value) : '' } : null;
+  // What "this" probably means: the file the front window has open, and any selected text.
+  var docUrl = isNil(fw) ? '' : text(safe(function () { return getAttr(fw, 'AXDocument'); }, null));
+  var doc = '';
+  if (docUrl) doc = safe(function () { return ObjC.unwrap($.NSURL.URLWithString(docUrl).path); }, '') || '';
+  var sel = isNil(fe) ? '' : text(safe(function () { return getAttr(fe, 'AXSelectedText'); }, null));
+  sel = String(sel || '').replace(/\s+/g, ' ').trim();
+  if (sel.length > 500) sel = sel.slice(0, 500) + '…';
 
   // The page search and the walk can both find the same thing: keep one.
   var seen = {};
@@ -546,7 +553,7 @@ function run(argv) {
   });
 
   return JSON.stringify({
-    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', focused: focused, apps: apps.map(function (a) { return a.name; }),
+    app: owner.name, pid: owner.pid, window: fwn ? fwn.title : '', document: doc, selection: sel, focused: focused, apps: apps.map(function (a) { return a.name; }),
     statusPids: statusPids, visited: visited, truncated: truncated, ms: Date.now() - started, elements: elements,
   });
 }

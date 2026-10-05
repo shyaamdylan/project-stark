@@ -19,6 +19,7 @@
 
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { describeScreen } = require('./guide');
+const { screenContext } = require('./observe');
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 20;
@@ -34,7 +35,9 @@ Use status "needs_teaching" when you are not confident you can do it properly, a
 Then say, in one or two short sentences, which part you don't know and that someone who knows it should teach it. Don't apologise at length.
 
 Use status "need_info" when you need something only the user knows (which file, what to call it, what to type); put the question in say. Never ask for passwords, card numbers or codes.
-Use status "done" only when the screen shows the goal is reached.`;
+Use status "done" only when the screen shows the goal is reached.
+
+Vague words ("this", "it", "that", "here") mean what's on their screen: the front window, the file it has open, the selected text, or the field they're in. Go with the most sensible reading rather than asking.`;
 
 const SCREEN_FORMAT = `Each turn you get what happened since your last step, then a numbered list of what's visible on screen, from macOS accessibility. Every line looks like:
   id | role | "label" | app | x,y
@@ -140,7 +143,7 @@ class Improviser {
     try {
       const screen = describeScreen(scan && scan.elements ? scan.elements : []);
       this.chosen = screen.chosen;
-      const turn = { note: `${note}${scan && scan.app ? `\nFront app: ${scan.app}${scan.window ? ` — "${scan.window}"` : ''}` : ''}`, screen: screen.text || '(nothing readable on screen)', reply: null };
+      const turn = { note: `${note}${scan && scan.app ? `\nIn front of them: ${screenContext(scan)}` : ''}`, screen: screen.text || '(nothing readable on screen)', reply: null };
       this.turns.push(turn);
       let response;
       try {

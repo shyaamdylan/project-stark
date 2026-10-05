@@ -136,6 +136,18 @@ sitting next to you rather than a click-through tutorial:
   the step. She answers, then brings you back to the goal.
 - **She notices if you've gone quiet** and checks in once ("Still with me?"), without nagging.
 
+### "This" means what's on your screen
+
+Vague questions are taken to be about what's in front of you: the front window, the file it has
+open, any text you've selected, or the field you're in.
+
+- **Ask about it:** "what does this do?", "what's this error mean?", "summarize this", "which one
+  should I pick?". Friday or Jarvis answers from what's on screen and points at what they're
+  talking about.
+- **"This" file:** "Jarvis, open this in Preview", "where's this saved?", "show this in Finder".
+- **Vague requests pick the skill that fits where you are**, so "how do I export this?" in one app
+  goes to the skill for that app.
+
 ### Awake or dormant
 
 The orb shows whether it's listening to you. **Dormant**: dimmer and calm, only listening for
