@@ -92,10 +92,11 @@ function parseQuery(text) {
   }
   const newest = NEWEST.test(raw);
   raw = raw.replace(new RegExp(NEWEST.source, 'g'), ' ').replace(/\bdownloaded\b/, ' ');
-  // "report.pdf" keeps its extension as a filter.
-  const dotted = /\.([a-z0-9]{2,5})$/.exec(raw.trim());
+  // "report.pdf" / "the README.md for PianoScribe" keeps its extension as a filter.
+  const dotted = /\b[a-z0-9_-]+\.([a-z0-9]{1,5})\b/.exec(raw);
   let exts = dotted ? [dotted[1]] : null;
-  const words = raw.replace(/\.[a-z0-9]{2,5}$/, '').replace(/["*\\]/g, ' ').split(/[^a-z0-9'&_-]+/).filter(Boolean);
+  if (dotted) raw = raw.replace(`.${dotted[1]}`, ' ');
+  const words = raw.replace(/\band open it\b|\band show (?:it|me)\b/g, ' ').replace(/["*\\]/g, ' ').split(/[^a-z0-9'&_-]+/).filter(Boolean);
   // "open my downloads (folder)": the folder itself.
   const named = words.filter((x) => !FILLER.has(x) && x !== 'folder');
   if (folder == null && named.length === 1 && FOLDERS[named[0]] !== undefined && named[0] !== 'home') {
@@ -226,11 +227,34 @@ function candidate(p, words, home) {
   return { path: real, name: path.basename(real), kind: verdict.kind || 'file', blocked: verdict.ok ? null : verdict.why, score: score(real, words, { mtime, home }), mtime };
 }
 
+// Squashed for comparing names and folders: "Piano Scribe" matches "PianoScribe".
+const squash = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Try each way of splitting the words into the file's name and the folders
+// around it ("readme" + "pianoscribe", or "piano scribe"), keeping files whose
+// folders contain the rest. Searches for the same name words run once.
+async function searchInFolders(words, search, home) {
+  const byName = new Map();
+  const out = [];
+  for (let i = 1; i < words.length; i++) {
+    for (const [name, context] of [[words.slice(0, i), words.slice(i)], [words.slice(i), words.slice(0, i)]]) {
+      const key = name.join(' ');
+      if (!byName.has(key)) byName.set(key, await search(nameQuery(name), name));
+      const want = squash(context.join(''));
+      for (const c of byName.get(key)) {
+        const dirs = squash(path.relative(home, path.dirname(c.path)));
+        if (want && dirs.includes(want)) out.push({ ...c, score: c.score - 0.03 });
+      }
+    }
+  }
+  return out;
+}
+
 // Up to `limit` candidates, best first: { path, name, kind, blocked, score }.
 // Tries, fastest first: a file you picked for this before, names containing
 // every word, then names or contents matching (Spotlight's own search), then
 // alternative names from `rephrase` (Claude) if given.
-async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null } = {}) {
+async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null, run = mdfind } = {}) {
   const q = parseQuery(text);
   const roots = q.folder != null ? [path.join(home, q.folder)] : [home, ...appRoots(home).filter((r) => fs.existsSync(r) && !within(r, home))];
 
@@ -254,14 +278,16 @@ async function findFiles(text, { limit = 5, home = os.homedir(), rephrase = null
     }
     return out;
   };
-  const search = async (query, words) => collect((await Promise.all(roots.map((r) => mdfind(['-onlyin', r, query])))).flat(), words);
+  const search = async (query, words) => collect((await Promise.all(roots.map((r) => run(['-onlyin', r, query])))).flat(), words);
 
   let results = [];
   if (q.words.length) {
     results = await search(nameQuery(q.words, q.sinceDays), q.words);
+    // "The README for PianoScribe": some words name the folder it's in, not the file.
+    if (!results.length && q.words.length >= 2) results = await searchInFolders(q.words, search, home);
     // Nothing by name: let Spotlight match names and contents its own way.
     if (!results.length) {
-      const plain = (await Promise.all(roots.map((r) => mdfind(['-onlyin', r, q.words.join(' ')], 200)))).flat();
+      const plain = (await Promise.all(roots.map((r) => run(['-onlyin', r, q.words.join(' ')], 200)))).flat();
       results = collect(plain, q.words).filter((c) => !q.sinceDays || c.mtime >= Date.now() - q.sinceDays * 86400000);
       results.forEach((c) => (c.score -= 0.1)); // a contents match is a weaker sign than the name
     }

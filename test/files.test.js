@@ -65,3 +65,40 @@ test('a clear winner opens straight away; a close call is a question', () => {
   assert.ok(isClear([{ score: 0.7 }, { score: 0.7 }], 'my latest screenshot'));
   assert.ok(isClear([{ score: 0.5, remembered: true }, { score: 0.9 }], 'budget'));
 });
+
+// A pretend Spotlight over real files in a temporary home folder: name queries
+// match every "*word*" against the file name, like kMDItemDisplayName does.
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { findFiles } = require('../src/files');
+
+function fakeHome(files) {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'stark-')));
+  for (const f of files) {
+    fs.mkdirSync(path.join(home, path.dirname(f)), { recursive: true });
+    fs.writeFileSync(path.join(home, f), 'x');
+  }
+  const all = files.map((f) => path.join(home, f));
+  const run = async ([, root, query]) => {
+    const words = [...query.matchAll(/"\*([^*"]+)\*"cd/g)].map((m) => m[1].toLowerCase());
+    if (!words.length) return [];
+    return all.filter((p) => p.startsWith(root) && words.every((w) => path.basename(p).toLowerCase().includes(w)));
+  };
+  return { home, run };
+}
+
+test('"the README.md for PianoScribe": the folder counts, not just the file name', async () => {
+  const { home, run } = fakeHome(['Documents/PianoScribe/README.md', 'Documents/Other/README.md', 'Documents/PianoScribe/src/main.js']);
+  for (const ask of ['the README.md for PianoScribe', 'README.md file for Piano Scribe and open it', 'the README.md file for PianoScribe in my Documents folder']) {
+    const found = await findFiles(ask, { home, run });
+    assert.equal(found[0] && path.relative(home, found[0].path), path.join('Documents', 'PianoScribe', 'README.md'), ask);
+  }
+});
+
+test('a plain name still finds the file directly', async () => {
+  const { home, run } = fakeHome(['Documents/Q3 Budget.xlsx', 'Downloads/old budget.txt']);
+  const found = await findFiles('the Q3 budget spreadsheet', { home, run });
+  assert.equal(found[0].name, 'Q3 Budget.xlsx');
+  assert.equal(found.length, 1);
+});

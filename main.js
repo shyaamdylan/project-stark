@@ -687,7 +687,18 @@ async function jarvisBasics(text, p) {
   return null;
 }
 
-async function askJarvis(text) {
+// Speech comes with "um"s and commas ("can you, um, find…"): drop them so the
+// request reads the way it was meant.
+function tidySpeech(text) {
+  return String(text || '')
+    .replace(/\b(um+|uh+|erm|er|hmm+|like)\b,?/gi, ' ')
+    .replace(/(\w),(\s)/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function askJarvis(raw) {
+  const text = tidySpeech(raw);
   const p = persona('jarvis', cfg);
   if (teach) return { ok: false, reason: 'busy', say: p.s("Friday is in the middle of a lesson{sir}. I'll wait until she's finished.") };
   stopGuide();
@@ -725,7 +736,8 @@ async function askJarvis(text) {
     if (res) return res;
   }
   if (find && !UI_WORDS.test(find[1])) {
-    const res = await openFileRequest(find[1], p, { reveal: true });
+    // "Find the README and open it" opens it; plain "find…" shows it in Finder.
+    const res = await openFileRequest(find[1], p, { reveal: !/\band open\b/i.test(find[1]) });
     if (res) return res;
   }
 
