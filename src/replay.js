@@ -8,6 +8,10 @@
 //
 // Claude is only asked when we can't find the next thing on screen (they went
 // somewhere else, or the app looks different); see `recover`.
+//
+// A "go" action (a step about reaching a website, app or screen) is done the
+// moment the user is there, however they got there, or as soon as the next
+// thing to click shows up. If they're already there it's skipped.
 
 const { findBest, normalize } = require('./matcher');
 
@@ -33,6 +37,10 @@ function buildActions(skill, plan) {
       const stepIndex = Math.max(0, Math.min(skill.map.steps.length - 1, p.step_number - 1));
       const first = stepIndex !== lastStep;
       lastStep = stepIndex;
+      const step = skill.map.steps[stepIndex];
+      if (p.kind === 'go' || (step.kind === 'go' && !e)) {
+        return { stepIndex, first, kind: 'go', role: null, label: '', destination: step.destination || null, say: p.say };
+      }
       const kind = p.kind === 'choose' ? 'choose' : p.kind === 'look' || !e ? 'look' : e.type === 'click' && RECORD_ROLES.has(e.role) ? 'choose' : p.kind;
       return { stepIndex, first, kind, role: e ? e.role : null, label: e && kind !== 'choose' ? e.label || '' : '', keys: e ? e.keys : undefined, value: e ? e.to : undefined, say: p.say };
     });
@@ -41,6 +49,11 @@ function buildActions(skill, plan) {
   const events = new Map((skill.session.events || []).map((e) => [e.id, e]));
   const actions = [];
   skill.map.steps.forEach((step, stepIndex) => {
+    // Getting somewhere: one action, never the route the expert happened to take.
+    if (step.kind === 'go' && step.destination) {
+      actions.push({ stepIndex, first: true, kind: 'go', role: null, label: '', destination: step.destination });
+      return;
+    }
     const evs = step.event_ids.map((id) => events.get(id)).filter((e) => e && (e.type === 'click' || e.type === 'edit' || e.type === 'shortcut'));
     let first = true;
     for (const e of evs) {
@@ -66,6 +79,7 @@ function lineFor(action, skill) {
     if (step.is_judgment && step.reason) line += ` ${step.reason.trim()}`;
     return line;
   }
+  if (action.kind === 'go') return `Now get to ${action.destination ? action.destination.name : 'the next screen'}.`;
   if (action.kind === 'edit') return `Now fill in ${action.label}.`;
   if (action.kind === 'shortcut') return `Now press ${spokenKeys(action.keys)}.`;
   if (action.role === 'AXMenuItem') return `Then choose ${action.label}.`;
@@ -89,6 +103,33 @@ function locate(action, elements) {
   if (sameLabel.length) return sameLabel.sort((a, b) => (a.z || 0) - (b.z || 0))[0];
   const fuzzy = findBest(action.label, elements);
   return fuzzy.match && fuzzy.score >= 0.85 ? fuzzy.match : null;
+}
+
+// Is the user at a "go" destination? The app's name, the site's address in an
+// address bar, or the site's name in the window title all count.
+function atDestination(scan, dest) {
+  if (!scan || !dest) return false;
+  const app = normalize(scan.app || '');
+  if (dest.app && !dest.url) return app === normalize(dest.app) || app.startsWith(normalize(dest.app));
+  let host = '';
+  try {
+    host = dest.url ? new URL(dest.url).hostname.replace(/^www\./, '') : '';
+  } catch {}
+  const title = normalize(scan.window || '');
+  if (host && (scan.elements || []).some((e) => typeof e.value === 'string' && e.value.toLowerCase().includes(host))) return true;
+  const name = normalize(dest.name || '').replace(/\b(website|site|app|page|the)\b/g, '').trim();
+  return Boolean(name) && title.includes(name);
+}
+
+// The first thing to click after `index` that has a label, if it's on screen already.
+function nextTargetVisible(actions, index, elements) {
+  for (let i = index + 1; i < actions.length; i++) {
+    const a = actions[i];
+    if (a.kind === 'go') return false;
+    if (!a.label || a.kind === 'shortcut') continue;
+    return Boolean(locate(a, elements || []));
+  }
+  return false;
 }
 
 const inside = (x, y, r, pad = 6) => x >= r.x - pad && y >= r.y - pad && x <= r.x + r.w + pad && y <= r.y + r.h + pad;
@@ -175,6 +216,11 @@ class Replay {
   point() {
     if (!this.running || !this.action) return;
     const a = this.action;
+    // Already where this step gets to? Carry straight on without a word.
+    if (a.kind === 'go' && this.arrived(this.latest)) {
+      this.complete(0);
+      return;
+    }
     this.target = this.latest ? locate(a, this.latest.elements) : null;
     this.baseValue = this.target ? this.target.value : null;
     this.editSeenAt = 0;
@@ -191,11 +237,22 @@ class Replay {
     });
   }
 
+  arrived(s) {
+    const a = this.action;
+    return Boolean(s && a && (atDestination(s, a.destination) || nextTargetVisible(this.actions, this.index, s.elements)));
+  }
+
   onScan(s) {
     this.latest = s;
     if (!this.running || this.recovering || !this.action) return;
     const a = this.action;
     const view = this.viewOf(s);
+
+    // However they got there.
+    if (a.kind === 'go') {
+      if (this.arrived(s)) this.complete(0);
+      return;
+    }
 
     // Waiting for the target to appear (a menu opening, a page loading).
     if (!this.target && a.label && a.kind !== 'any-click' && a.kind !== 'shortcut') {
@@ -298,4 +355,4 @@ class Replay {
   }
 }
 
-module.exports = { Replay, buildActions, lineFor, locate };
+module.exports = { Replay, buildActions, lineFor, locate, atDestination, nextTargetVisible };

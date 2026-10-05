@@ -60,6 +60,14 @@ main { max-width: 1240px; margin: 0 auto; padding: 8px 24px 48px; display: grid;
 .tag { border-radius: 6px; padding: 1px 7px; font-size: 11px; font-weight: 600; }
 .tag.j { background: var(--judge-soft); color: var(--judge); }
 .tag.g { background: var(--limit-soft); color: var(--limit); }
+.tag.go { background: var(--accent-soft); color: var(--accent); }
+.tag.added { background: var(--exception-soft); color: var(--exception); }
+.prereq { max-width: 1240px; margin: 0 auto; padding: 0 24px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .prereq { grid-template-columns: 1fr; } }
+.prereq .card { padding: 14px 18px; }
+.prereq ul { margin: 0; padding-left: 18px; }
+.prereq li { margin: 3px 0; }
+.note { font-size: 13px; color: var(--muted); margin-top: 6px; }
 .detail { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); overflow: hidden; }
 .moment { position: relative; background: #0b1020; }
 .moment img { display: block; width: 100%; height: auto; }
@@ -108,6 +116,7 @@ section.extra { max-width: 1240px; margin: 0 auto; padding: 0 24px 64px; display
   <p class="summary" id="summary"></p>
   <div class="chips" id="chips"></div>
 </header>
+<section class="prereq" id="prereq"></section>
 <main>
   <ol class="timeline" id="timeline"></ol>
   <article class="detail" id="detail"></article>
@@ -151,6 +160,20 @@ function moment(step) {
   return ids.find((e) => e.frame && e.rect) || ids.find((e) => e.frame) || ids[0] || null;
 }
 
+// What the task relies on, and what the apprentice tidied up from the recording.
+function listCard(title, items, note) {
+  const c = el('div', 'card');
+  c.append(el('h3', '', title));
+  const ul = el('ul');
+  for (const t of items) ul.append(el('li', '', t));
+  c.append(ul);
+  if (note) c.append(el('div', 'note', note));
+  return c;
+}
+if ((M.prerequisites || []).length) $('prereq').append(listCard('Before you start', M.prerequisites));
+if ((M.cleanup_notes || []).length) $('prereq').append(listCard('Tidied up from the recording', M.cleanup_notes, 'So anyone can follow it from wherever they start.'));
+if (!$('prereq').children.length) $('prereq').remove();
+
 let current = 0;
 const buttons = [];
 M.steps.forEach((s, i) => {
@@ -163,6 +186,8 @@ M.steps.forEach((s, i) => {
   const meta = el('span', 'step-meta');
   const m = moment(s);
   if (m) meta.append(el('span', '', clock(m.t)));
+  if (s.kind === 'go') meta.append(el('span', 'tag go', 'Get to'));
+  if (s.inferred) meta.append(el('span', 'tag added', 'Added to fill a gap'));
   if (s.is_judgment) meta.append(el('span', 'tag j', 'Judgment'));
   if (s.guardrails.length) meta.append(el('span', 'tag g', s.guardrails.length + (s.guardrails.length > 1 ? ' guardrails' : ' guardrail')));
   txt.append(meta);
@@ -206,6 +231,12 @@ function show(i) {
   body.append(el('div', 'label', 'Step ' + (i + 1) + ' of ' + M.steps.length));
   body.append(el('h2', '', s.title));
   body.append(el('p', 'action', s.action));
+  if (s.kind === 'go' && s.destination) {
+    const b = el('div', 'block');
+    b.append(el('div', 'label', 'Get to'), el('div', 'rule', s.destination.name + (s.destination.url ? '  ·  ' + s.destination.url : '') + '  (from anywhere; skip if you are already there)'));
+    body.append(b);
+  }
+  if (s.inferred) body.append(el('div', 'note', 'Not in the recording: added by the apprentice to fill a gap.'));
   if (s.decision) {
     const b = el('div', 'block');
     b.append(el('div', 'label', 'Decision'), el('div', 'decision', s.decision));
@@ -242,7 +273,7 @@ function show(i) {
   const evs = s.event_ids.map((id) => ev.get(id)).filter(Boolean);
   if (evs.length) {
     const det = el('details');
-    det.append(el('summary', '', 'What happened on screen (' + evs.length + ')'));
+    det.append(el('summary', '', (s.kind === 'go' ? 'How the expert happened to get there (' : 'What happened on screen (') + evs.length + ')'));
     const ul = el('ul', 'events');
     for (const e of evs) {
       const [a, b, c] = describe(e);

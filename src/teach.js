@@ -271,8 +271,18 @@ class TeachSession {
     this.qas.push({ id: this.qas.length + 1, t: this.now(), phase: 'teach-back', kind: 'teach_back', question: draft.teach_back, answer: reply, event_ids: [] });
 
     this.status('Writing up your Work Map…');
-    const map = await this.apprentice.finalizeMap({ title: this.title, events: this.events, qas: this.qas, draft, teachBackReply: reply });
+    let map = await this.apprentice.finalizeMap({ title: this.title, events: this.events, qas: this.qas, draft, teachBackReply: reply });
     map.confirmed = !reply || /^(yes|yep|yeah|correct|right|that'?s right|looks good|perfect|exactly)\b/i.test(reply.trim());
+
+    // Tidy it up for other people: drop where this expert happened to start,
+    // describe where to get to rather than the route, fill the gaps. If that
+    // fails, the untidied map is still a good lesson.
+    this.status('Tidying it up so anyone can follow it…');
+    try {
+      map = await this.apprentice.refineMap({ title: this.title, events: this.events, qas: this.qas, map });
+    } catch (err) {
+      console.error('[teach] tidy up', err.message);
+    }
     return map;
   }
 

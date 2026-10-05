@@ -70,9 +70,24 @@ the orb turns gold. "Hey Friday" switches back.
   waits for your **yes**. Then he does it: the orb's cursor flies to each button just before he
   clicks it, so you can see exactly what he's doing. Or open the **Skills Hub** and press
   **Have Jarvis do it**.
-- **Open files and apps:** "Jarvis, open the Q3 budget spreadsheet", "open Safari". He finds it
-  with Spotlight; if a few files match, he asks which one.
+- **Find and open any file:** "open the Q3 budget spreadsheet", "the PDF I downloaded yesterday",
+  "my latest screenshot", "the budget on my desktop in Numbers", "open my downloads". He searches
+  names first, then contents, then (with Claude) other names it might have ("tax return" →
+  "1040"), and ranks by how well it matches and how recently you used it. If a few are equally
+  likely he asks which, and remembers your pick next time. "Where's my passport scan?" shows it in
+  Finder instead.
+- **Switch between windows:** "switch to the budget spreadsheet", "go back to YouTube", "find the
+  window I had the meeting open in". He looks through every open window (minimised ones too) and
+  Safari / Chrome / Brave / Edge / Arc tabs, and brings the right one to the front. Descriptions
+  rather than names go to Claude. Asking to open something that's already open just switches to it.
 - **Press a button:** "Jarvis, click Share."
+- **The basics need no lesson:** "go to youtube.com", "search for flights to Rome", "type hello
+  everyone", "press command S".
+- **Anything else, he has a go.** "I haven't been taught this one, sir, but I'm happy to have a
+  go…" He works it out from what's on screen, one action at a time, with the same safety checks
+  as a learned task. If he isn't confident he can do it properly (a company-specific process, a
+  judgment call, or it isn't working), he stops, at the start or halfway through, and says it
+  needs teaching.
 - "How do I…" questions go to Friday, since that's learning rather than doing.
 
 **Safety.** Jarvis is careful by design:
@@ -96,6 +111,14 @@ Jarvis needs `ANTHROPIC_API_KEY` for tasks (opening files and pressing buttons d
 first time he clicks or types, macOS may ask again for Accessibility and Automation → System
 Events for your terminal app.
 
+### Things nobody has taught yet
+
+Ask Friday how to do something she hasn't learned ("how do I turn on dark mode?", "open my
+downloads") and she doesn't just say no: "I haven't been taught this, but let's give it a go."
+She points at each step using general knowledge of macOS and common apps, and moves on when you
+click, type, or the screen changes. If she isn't sure about a part, she says so honestly and
+offers to learn it: say **"let me show you"** and she starts a lesson for exactly that task.
+
 ### Teach it a task (the apprentice)
 
 Type `teach: <what you're about to do>` in the prompt, or pick *Teach me a task…* from the
@@ -110,7 +133,13 @@ loud; it sends your answer after a short pause, so take your time. Start talking
 speaking and it stops to listen. Say "off the record", "back on the record" or "I'm done".
 
 Press **Finish** (or type `done`). It asks up to three debrief questions, explains the process
-back to you, applies your corrections and opens the **Work Map**: a step-by-step tutorial with
+back to you, applies your corrections, then **tidies it up** so anyone can follow it from
+wherever they start: it drops where you happened to begin (if you were on Facebook and typed the
+real site's address, the lesson just says "open canva.com"), detours and stray clicks, lists
+what the task assumes ("Signed in to Canva") under *Before you start*, and fills obvious gaps
+(marked as added). It never invents reasons or rules. Skills taught before this are tidied the
+first time they're used (the original is kept as `workmap.original.json`). Then it opens the
+**Work Map**: a step-by-step tutorial with
 the screen moment, the decision, your reason in your own words and the guardrails for each
 step. Everything it has learned is in the **Skills Hub** (👀 menu → *Open Skills Hub*):
 browse, search, open or delete skills, or teach a new one.
@@ -184,6 +213,8 @@ orb squeezes out a droplet → spark flies over → becomes the cursor, ring + v
   the replay plan with the safety checks above. `src/act.js` (with `src/jxa/act.js`) does the
   clicking and typing; `src/files.js` finds and safely opens files; `src/persona.js` holds both
   agents' names, voices and phrases.
+- `src/improvise.js` is the best-effort help for untaught tasks: Claude looks at the screen and
+  gives one step at a time, or says honestly that it needs teaching.
 - `src/guide.js` runs walkthroughs: each turn sends Claude your goal and a numbered list of
   on-screen elements, and gets back one step (what to say, which element to point at).
   `main.js` then watches a cheap screen fingerprint (windows, focus, open menu) to know

@@ -146,6 +146,98 @@ const MAP_SCHEMA = {
   additionalProperties: false,
 };
 
+// ---------- tidying up: from "what this expert did" to "what anyone should do" ----------
+
+// Bump when the cleanup rules change, so older skills are tidied again.
+const REFINE_VERSION = 1;
+
+const REFINE_SYSTEM = `You're tidying up a Work Map that was just written from an expert's screen recording, so anyone can follow it from wherever they happen to be.
+
+1. Remove what was incidental to this one recording: where the expert happened to start (an unrelated app, website or page that was already open; for example they were on Facebook, clicked the address bar and typed the address of the site the task is really about), unrelated tabs and windows, notifications, detours, accidental clicks, things they undid, and waiting. Never remove anything the task needs.
+2. Describe getting somewhere by where to get to, never by the route from the incidental place. A step whose job is reaching a website, app, page or screen gets kind "go" and a destination: name (how a person would say it), url (the address the expert ended up at, for a website; else null), app (for a desktop app; else null). Its action reads like "Open canva.com in your browser; any tab is fine." Someone who is already there just carries on. Never imply they must start where the expert started. Every other step has kind "do" and destination null.
+3. Fill gaps. Things the task relied on that the recording only implies (being signed in, a file or record already open, a setting already on) go in prerequisites, each a short phrase ("Signed in to Canva"). If a step is clearly missing between two recorded ones (a menu had to be opened, a page had to load), add it with inferred true, an action saying what to do, and empty event_ids. Steps from the recording have inferred false.
+4. Keep everything that belongs to the task exactly as it is: the expert's reasons and quotes, rules, guardrails, reason_qa_id, reason_event_id, judgment flags. Keep event_ids for what you keep; drop ids that only belonged to removed, incidental actions.
+5. Never invent reasons, rules or guardrails. They only ever come from the expert.
+6. summary: rewrite only if it mentions incidental things. open_questions: keep as they are. teach_back: update it only if the steps changed, in the same voice, starting "Here's how I understand it".
+7. cleanup_notes: what you changed, in plain words for the expert, at most 5 (e.g. "Dropped starting on Facebook: you can open Canva from anywhere."). Empty if nothing needed changing.`;
+
+const REFINED_STEP_SCHEMA = {
+  ...STEP_SCHEMA,
+  properties: {
+    ...STEP_SCHEMA.properties,
+    kind: { type: 'string', enum: ['do', 'go'] },
+    destination: {
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            url: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+            app: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          },
+          required: ['name', 'url', 'app'],
+          additionalProperties: false,
+        },
+        { type: 'null' },
+      ],
+    },
+    inferred: { type: 'boolean' },
+  },
+  required: [...STEP_SCHEMA.required, 'kind', 'destination', 'inferred'],
+};
+
+const REFINE_SCHEMA = {
+  type: 'object',
+  properties: {
+    ...MAP_SCHEMA.properties,
+    steps: { type: 'array', items: REFINED_STEP_SCHEMA },
+    prerequisites: { type: 'array', items: { type: 'string' } },
+    cleanup_notes: { type: 'array', items: { type: 'string' } },
+  },
+  required: [...MAP_SCHEMA.required, 'prerequisites', 'cleanup_notes'],
+  additionalProperties: false,
+};
+
+// Only web addresses are kept as destinations (Jarvis may open them).
+function cleanUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// Make Claude's tidied map safe to use, falling back to the original where it's off.
+function normalizeRefined(original, refined, events) {
+  if (!refined || !Array.isArray(refined.steps) || !refined.steps.length) return { ...original, refined: REFINE_VERSION, prerequisites: [], cleanup_notes: [] };
+  const ids = new Set((events || []).map((e) => e.id));
+  const steps = refined.steps.map((s) => {
+    const dest = s.kind === 'go' && s.destination ? { name: String(s.destination.name || '').trim(), url: cleanUrl(s.destination.url), app: s.destination.app ? String(s.destination.app).trim() : null } : null;
+    return {
+      ...s,
+      kind: dest && dest.name ? 'go' : 'do',
+      destination: dest && dest.name ? dest : null,
+      inferred: Boolean(s.inferred),
+      event_ids: (s.event_ids || []).filter((id) => ids.has(id)),
+      guardrails: Array.isArray(s.guardrails) ? s.guardrails : [],
+    };
+  });
+  return {
+    ...original,
+    title: refined.title || original.title,
+    summary: refined.summary || original.summary,
+    steps,
+    open_questions: refined.open_questions || original.open_questions || [],
+    teach_back: refined.teach_back || original.teach_back,
+    prerequisites: (refined.prerequisites || []).filter(Boolean).slice(0, 8),
+    cleanup_notes: (refined.cleanup_notes || []).filter(Boolean).slice(0, 5),
+    refined: REFINE_VERSION,
+  };
+}
+
 // ---------- calling Claude ----------
 
 class Apprentice {
@@ -210,6 +302,21 @@ class Apprentice {
     ].join('\n\n');
     return this.json(MAP_SYSTEM, user, MAP_SCHEMA, { effort: 'medium', maxTokens: 12000 });
   }
+
+  // The final pass: drop what was incidental to this recording (where the
+  // expert happened to start, detours), turn "how they got there" into "where
+  // to get to", and fill the gaps the recording only implies.
+  async refineMap({ title, events, qas, map }) {
+    const { confirmed, refined, prerequisites, cleanup_notes, ...current } = map;
+    const user = [
+      `Task: ${title}`,
+      `Screen events:\n${events.map(describeEvent).join('\n') || '(none)'}`,
+      `Questions and answers:\n${describeQas(qas)}`,
+      `Work Map to tidy up:\n${JSON.stringify(current)}`,
+    ].join('\n\n');
+    const out = await this.json(REFINE_SYSTEM, user, REFINE_SCHEMA, { effort: 'medium', maxTokens: 14000 });
+    return { ...normalizeRefined(map, out, events), confirmed: map.confirmed };
+  }
 }
 
-module.exports = { Apprentice, describeEvent, describeScreen, clock };
+module.exports = { Apprentice, describeEvent, describeScreen, clock, normalizeRefined, cleanUrl, REFINE_VERSION };

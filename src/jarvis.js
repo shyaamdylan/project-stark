@@ -20,7 +20,7 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { describeEvent } = require('./apprentice');
 const { findBest, normalize } = require('./matcher');
-const { locate } = require('./replay');
+const { locate, atDestination, nextTargetVisible } = require('./replay');
 const { parseShortcut } = require('./act');
 
 const MODEL = 'claude-opus-5-5';
@@ -34,6 +34,7 @@ const SETTLE_MS = 700; // give the app a moment to react after each action
 const LOOK_MS = 1500;
 const HANDOFF_MS = 90000; // how long to wait for the user to do something for him
 const ASSIST_GRACE_MS = 10000; // after a hand-off click, more clicks for that same episode don't stop him
+const ARRIVE_MS = 15000; // after opening a site or app, how long to wait for it to show up
 const MAX_RUN_MS = 15 * 60 * 1000;
 
 // ---------- safety rules (pure, tested) ----------
@@ -127,6 +128,7 @@ function describeAction(a, i) {
     case 'click': line = `click ${what} "${a.label}"`; break;
     case 'edit': line = `set ${what} "${a.label}" (the expert entered "${a.value ?? ''}")`; break;
     case 'shortcut': line = `press ${a.keys}`; break;
+    case 'go': line = `get to ${a.destination ? `${a.destination.name}${a.destination.url ? ` (${a.destination.url})` : ''}` : 'the next screen'} (skipped if already there; needs no input)`; break;
     case 'choose': case 'any-click': line = `pick the case-specific item${a.say ? ` (${a.say})` : ''}`; break;
     default: line = `wait / check${a.say ? ` (${a.say})` : ''}`;
   }
@@ -253,7 +255,9 @@ class JarvisRun {
   //   plan      from planRun
   //   s(line)   fills in the form of address ("Right away{sir}.")
   //   scan()    front-window scan
-  //   act       { click(rect), type(text), keys(spec), selectAll(), escape() }
+  //   act       { click(rect), type(text), keys(spec), selectAll(), escape(),
+  //               openUrl(url), openApp(name) -> true if found,
+  //               openFile(query) -> name or null, switchTo(query) -> description or null }
   //   ask(text, phase) -> the user's answer ('' if skipped or cancelled)
   //   emit(ev)  { type: 'step' | 'point' | 'say', say, stepNo, totalSteps, target }
   //   wait(ms)  (tests pass a fast one, and a short findMs)
@@ -277,6 +281,8 @@ class JarvisRun {
     this.assistUntil = 0; // while true, clicks continue the hand-off episode rather than stopping him
     this.asking = false; // waiting on the user's answer: they may click around to check something
     this.executing = false; // past the go-ahead, doing the steps
+    this.userDriving = false; // he asked the user to bring something up: their clicks are expected
+    this.index = 0;
     this.inputs = {};
     this.log = [];
     this.latest = null;
@@ -304,7 +310,7 @@ class JarvisRun {
   onUserClick() {
     if (!this.running) return;
     if (this.handoff) return this.handoff(true);
-    if (this.asking || !this.executing) return;
+    if (this.asking || this.userDriving || !this.executing) return;
     // Our own clicks show up here too; ignore anything just after we acted.
     if (this.acting || Date.now() - this.actedAt < 500) return;
     // Finding and clicking the one thing he handed off is rarely a single
@@ -491,6 +497,7 @@ class JarvisRun {
     let lastStep = -1;
     for (let i = 0; i < this.actions.length; i++) {
       this.check();
+      this.index = i;
       const a = this.actions[i];
       const p = plan.actions[i];
       if (a.stepIndex !== lastStep) {
@@ -534,6 +541,7 @@ class JarvisRun {
       case 'click': return this.doClick(a);
       case 'edit': return this.doEdit(a, p, i);
       case 'shortcut': return this.doShortcut(a);
+      case 'go': return this.doGo(a);
       case 'choose':
       case 'any-click': return this.doChoose(a, p);
       default:
@@ -546,6 +554,51 @@ class JarvisRun {
     const el = await this.find(a);
     if (!el) return this.handOff(`I can't find "${a.label}" on screen{sir}. Would you click it for me? I'll take it from there.`);
     await this.clickOn(el, 'click');
+  }
+
+  // Is the user where a "go" step gets to (or is the next thing to click already showing)?
+  async isThere(a) {
+    const s = await this.scan();
+    return Boolean(s && (atDestination(s, a.destination) || nextTargetVisible(this.actions, this.index, s.elements)));
+  }
+
+  async waitUntilThere(a, ms) {
+    const until = Date.now() + ms;
+    for (;;) {
+      if (await this.isThere(a)) return true;
+      if (Date.now() > until) return false;
+      await this.wait(700);
+    }
+  }
+
+  // Get to a website, app or screen from wherever the user happens to be.
+  async doGo(a) {
+    const d = a.destination || { name: 'the right screen' };
+    if (await this.isThere(a)) return this.record({ kind: 'go', detail: `already at ${d.name}` });
+    let opened = false;
+    if (d.url && this.act.openUrl) {
+      await this.doAct(() => this.act.openUrl(d.url));
+      opened = true;
+    } else if (d.app && this.act.openApp) {
+      await this.doAct(async () => {
+        opened = await this.act.openApp(d.app);
+      });
+    }
+    this.record({ kind: 'go', detail: opened ? `opened ${d.url || d.app}` : `asked the user to bring up ${d.name}` });
+    if (opened && (await this.waitUntilThere(a, ARRIVE_MS))) return this.wait(SETTLE_MS);
+
+    // Couldn't get there himself: the user brings it up, and he carries on once it's on screen.
+    this.emit({ type: 'say', say: this.s(`Would you bring up ${d.name} for me{sir}? I'll carry on as soon as it's on screen.`) });
+    this.userDriving = true;
+    try {
+      if (!(await this.waitUntilThere(a, HANDOFF_MS))) {
+        this.stop('handoff-timeout');
+        this.check();
+      }
+    } finally {
+      this.userDriving = false;
+    }
+    await this.wait(SETTLE_MS);
   }
 
   async doShortcut(a) {
@@ -646,4 +699,173 @@ class JarvisRun {
   }
 }
 
-module.exports = { JarvisRun, planRun, normalizePlan, riskOf, isSensitiveField, isSearchLikeField, isYes, sameValue, describeSkillForJarvis, spokenKeys };
+// ---------- having a go at something he wasn't taught ----------
+//
+// The same hands and the same safety rules as a learned skill, but each next
+// action comes from Claude looking at the screen (src/improvise.js). He says
+// up front that he hasn't been taught it, asks for a yes, and stops the moment
+// Claude isn't confident ("needs_teaching"), at the start or halfway through.
+
+const { cleanUrl } = require('./apprentice');
+
+class JarvisFreestyle extends JarvisRun {
+  // deps as JarvisRun, minus skill/actions/plan, plus:
+  //   goal        what the user asked for
+  //   improviser  an Improviser in 'do' mode (or a fake in tests)
+  constructor({ goal, improviser, ...deps }) {
+    super({ skill: { map: { title: goal, steps: [] }, session: { events: [] } }, actions: [], plan: { can_run: true, inputs: [], actions: [], step_lines: [] }, ...deps });
+    this.goal = goal;
+    this.brain = improviser;
+  }
+
+  async runInner() {
+    let note = `The user asked: "${this.goal}"`;
+    let failures = 0;
+    for (let step = 0; ; step++) {
+      this.check();
+      const s = await this.scan();
+      const r = await this.brain.next(note, s || { elements: [] });
+      this.check();
+      this.record({ kind: 'think', detail: `${r.status} ${r.kind}${r.target ? ` "${r.target.label}"` : ''}${r.text ? ` ${r.text}` : ''}`, value: r.say });
+
+      if (r.status === 'done') {
+        this.running = false;
+        return { status: 'done', say: r.say || this.s('Done{sir}.') };
+      }
+      if (r.status === 'needs_teaching') {
+        this.running = false;
+        const lead = this.executing ? this.s("I'll stop there{sir}. ") : this.s("I'm afraid I haven't been taught that one{sir}. ");
+        return { status: 'needs_teaching', say: `${lead}${r.say} ${this.s('Once Friday has learned it, I can do it for you.')}`.replace(/\s+/g, ' ').trim() };
+      }
+      if (r.status === 'need_info') {
+        const answer = await this.ask(r.say, 'jarvis-input');
+        if (!answer) {
+          this.stop('declined');
+          this.check();
+        }
+        note = `The user answered: "${answer}"`;
+        continue;
+      }
+
+      // Before the first action: say it's a best effort and get a yes.
+      if (!this.executing) {
+        const plan = r.summary || this.s(`I'll see what I can do{sir}.`);
+        const ok = await this.confirm(`${this.s("I haven't been taught this one{sir}, but I'm happy to have a go.")} ${plan} ${this.s('Shall I proceed?')}`);
+        if (!ok) {
+          this.stop('declined');
+          this.check();
+        }
+        this.executing = true;
+        // The screen may have changed while he waited for the yes.
+        await this.scan();
+      }
+
+      if (r.say) this.emit({ type: 'step', say: r.say, stepNo: step + 1, totalSteps: 0 });
+      try {
+        note = await this.doStep(r);
+        failures = 0;
+      } catch (err) {
+        if (err instanceof Stopped || err.code) throw err;
+        failures++;
+        note = `That didn't work: ${err.message}. Look at the screen again.`;
+        if (failures >= 2) {
+          this.running = false;
+          return { status: 'needs_teaching', say: this.s("That isn't going to plan, so I've stopped{sir}. This one is worth teaching properly.") };
+        }
+      }
+    }
+  }
+
+  // Carry out one action, with the same checks as a learned skill. Returns
+  // what happened, for Claude's next turn.
+  async doStep(r) {
+    const t = r.target;
+    switch (r.kind) {
+      case 'click': {
+        if (!t) throw new Error('there was nothing to click');
+        if (riskOf({ kind: 'click', label: t.label }) && !(await this.confirm(this.s(`That will press "${t.label}". Shall I go ahead{sir}?`)))) {
+          this.stop('declined');
+          this.check();
+        }
+        await this.clickOn(t, 'click');
+        return `Done: clicked "${t.label}".`;
+      }
+      case 'type': {
+        const text = r.text || '';
+        if (t && isSensitiveField(t.label)) {
+          const answer = await this.ask(this.s(`I'll leave "${t.label}" to you{sir}; I don't type those. Fill it in, then say done.`), 'jarvis-input');
+          if (!answer) {
+            this.stop('declined');
+            this.check();
+          }
+          return `The user filled in "${t.label}" themselves.`;
+        }
+        if (t) await this.clickOn(t, 'focus');
+        await this.doAct(async () => {
+          if (t) await this.act.selectAll();
+          await this.act.type(text);
+        });
+        this.record({ kind: 'type', label: t ? t.label : '(focused field)', value: text });
+        await this.wait(SETTLE_MS);
+        return `Done: typed "${text}"${t ? ` into "${t.label}"` : ''}.`;
+      }
+      case 'keys': {
+        const spec = parseShortcut(r.text);
+        if (!spec) throw new Error(`I don't know the key "${r.text}"`);
+        if (riskOf({ kind: 'shortcut', keys: r.text }) && !(await this.confirm(this.s(`That would press ${spokenKeys(r.text)}. Shall I go ahead{sir}?`)))) {
+          this.stop('declined');
+          this.check();
+        }
+        await this.doAct(() => this.act.keys(spec));
+        this.record({ kind: 'keys', detail: r.text });
+        await this.wait(SETTLE_MS);
+        return `Done: pressed ${r.text}.`;
+      }
+      case 'open_url': {
+        const url = cleanUrl(r.text);
+        if (!url) throw new Error(`"${r.text}" isn't a web address`);
+        await this.doAct(() => this.act.openUrl(url));
+        this.record({ kind: 'go', detail: `opened ${url}` });
+        await this.wait(2500);
+        return `Done: opened ${url}.`;
+      }
+      case 'open_app': {
+        let ok = false;
+        await this.doAct(async () => {
+          ok = await this.act.openApp(r.text || '');
+        });
+        this.record({ kind: 'go', detail: ok ? `opened ${r.text}` : `couldn't find ${r.text}` });
+        if (!ok) throw new Error(`there's no app called "${r.text}" in Applications`);
+        await this.wait(2000);
+        return `Done: opened ${r.text}.`;
+      }
+      case 'open_file': {
+        let name = null;
+        await this.doAct(async () => {
+          name = this.act.openFile ? await this.act.openFile(r.text || '') : null;
+        });
+        this.record({ kind: 'go', detail: name ? `opened file ${name}` : `no file for "${r.text}"` });
+        if (!name) throw new Error(`no file matching "${r.text}" in the home folder`);
+        await this.wait(2000);
+        return `Done: opened the file ${name}.`;
+      }
+      case 'switch_to': {
+        let which = null;
+        await this.doAct(async () => {
+          which = this.act.switchTo ? await this.act.switchTo(r.text || '') : null;
+        });
+        this.record({ kind: 'go', detail: which ? `switched to ${which}` : `nothing open like "${r.text}"` });
+        if (!which) throw new Error(`nothing open matches "${r.text}"`);
+        await this.wait(SETTLE_MS);
+        return `Done: brought ${which} to the front.`;
+      }
+      case 'wait':
+        await this.wait(2000);
+        return 'Waited a moment.';
+      default:
+        throw new Error('that step had no action');
+    }
+  }
+}
+
+module.exports = { JarvisRun, JarvisFreestyle, planRun, normalizePlan, riskOf, isSensitiveField, isSearchLikeField, isYes, sameValue, describeSkillForJarvis, spokenKeys };

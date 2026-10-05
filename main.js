@@ -8,16 +8,19 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, Tray, Menu, systemPreferences, shell, nativeImage, desktopCapturer, session, protocol } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 const { uIOhook, UiohookKey } = require('uiohook-napi');
 const { loadConfig } = require('./src/config');
-const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp } = require('./src/finder');
+const { scanFrontApp, scanFrontWindow, refocusFrontApp, warmUp, screenFingerprint } = require('./src/finder');
 const { Guide, findSkill, planReplay, locateTarget } = require('./src/guide');
 const { Replay, buildActions } = require('./src/replay');
-const { JarvisRun, planRun, riskOf, isYes } = require('./src/jarvis');
+const { JarvisRun, JarvisFreestyle, planRun, riskOf, isYes } = require('./src/jarvis');
+const { Improviser, ImprovisedWalkthrough } = require('./src/improvise');
 const { AGENTS, persona, rendererInfo } = require('./src/persona');
-const { findFiles } = require('./src/files');
+const { findFiles, isClear, parseQuery, appRoots, setPicksFile, rememberPick, makeRephrase } = require('./src/files');
+const windows = require('./src/windows');
 const act = require('./src/act');
-const { Apprentice } = require('./src/apprentice');
+const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
 const { transcribe } = require('./src/stt');
@@ -247,8 +250,12 @@ async function ask(text) {
   const canGuide = Guide.available(cfg);
   if (canGuide && looksLikeTask(text)) {
     const res = await startGuide(text, scan);
-    // Not a learned skill: it may still be one obvious button on screen.
-    return res.reason === 'not-learned' ? locateOnScreen(text, scan) : res;
+    if (res.reason !== 'not-learned') return res;
+    // Not a learned skill: it may still be one obvious button on screen...
+    const one = await locateOnScreen(text, scan);
+    if (one.ok) return one;
+    // ...and if not, she has a go anyway, and says honestly if she can't.
+    return startImprovGuide(text);
   }
 
   const result = findBest(text, scan.elements);
@@ -287,7 +294,7 @@ let replay = null;
 
 function looksLikeTask(text) {
   const t = text.trim().toLowerCase();
-  return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i)\b/.test(t);
+  return /^(how|what('s| is) the way|show me how|help( me)?|walk me|teach me|i (want|need|would like) to|can you|could you|guide me|where do i|open|go to|search|look up|create|make|change|turn (on|off)|set ?up|add|install|get to|sign (in|up)|log in|download|upload|share|send|save|export|print)\b/.test(t);
 }
 
 const GENERIC = new Set(['file', 'files', 'this', 'that', 'thing', 'button', 'page', 'screen', 'app', 'here', 'there', 'one', 'option', 'menu', 'find', 'click', 'press', 'open', 'go', 'see']);
@@ -354,6 +361,33 @@ async function replayPlan(id, skill) {
   fs.writeFileSync(file, JSON.stringify(plan, null, 2));
   console.log(`[guide] replay plan for "${skill.map.title}": ${plan.actions.length} actions`);
   return plan;
+}
+
+// Skills taught before the tidy-up pass existed (or under older rules) are
+// tidied the first time they're used. The original stays as workmap.original.json.
+async function ensureRefined(id, skill) {
+  if ((skill.map.refined || 0) >= REFINE_VERSION || !Guide.available(cfg)) return skill;
+  const dir = skillDir(id);
+  if (win) win.webContents.send('say', { text: 'Tidying up that lesson first…', speak: false });
+  try {
+    const map = await new Apprentice(cfg.anthropicApiKey).refineMap({
+      title: skill.session.title || skill.map.title,
+      events: skill.session.events || [],
+      qas: skill.session.qas || [],
+      map: skill.map,
+    });
+    const original = path.join(dir, 'workmap.original.json');
+    if (!fs.existsSync(original)) fs.copyFileSync(path.join(dir, 'workmap.json'), original);
+    fs.writeFileSync(path.join(dir, 'workmap.json'), JSON.stringify(map, null, 2));
+    fs.writeFileSync(path.join(dir, 'index.html'), renderWorkMap({ map, session: skill.session }));
+    // Plans made from the old map no longer fit.
+    for (const f of ['replay.json', 'jarvis.json']) fs.rmSync(path.join(dir, f), { force: true });
+    console.log(`[skills] tidied "${map.title}": ${map.cleanup_notes.join(' | ') || 'nothing to change'}`);
+    return { ...skill, map };
+  } catch (err) {
+    console.error('[skills] tidy up', err.message);
+    return skill;
+  }
 }
 
 function loadSkill(id) {
@@ -436,8 +470,9 @@ ipcMain.handle('confirm', async (_e, rawText) => {
 });
 
 async function beginSkill(id, text) {
-  const skill = loadSkill(id);
+  let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: "I haven't learned that yet." };
+  skill = await ensureRefined(id, skill);
 
   let plan = null;
   try {
@@ -481,7 +516,14 @@ async function beginSkill(id, text) {
 }
 
 function stopGuide() {
-  if (!replay) return;
+  if (improv) {
+    improv.stop();
+    improv = null;
+  }
+  if (!replay) {
+    if (!teach && !jarvisRun) stopInputHook();
+    return;
+  }
   replay.stop();
   replay = null;
   if (!teach && !jarvisRun) stopInputHook();
@@ -489,7 +531,42 @@ function stopGuide() {
 
 ipcMain.on('guide-next', () => {
   if (replay) replay.skip();
+  if (improv) improv.skip();
 });
+
+// ---------- best effort: tasks nobody has taught yet ----------
+//
+// Friday still helps with things she wasn't taught (opening an app, searching
+// a site, changing a common setting), pointing at each step with Claude's
+// general knowledge. She says so up front, and stops to say it needs teaching
+// the moment she isn't confident, at the start or halfway through.
+
+let improv = null; // ImprovisedWalkthrough
+let lastUnlearned = ''; // the last thing they couldn't do: "let me show you" teaches it
+
+function startImprovGuide(goal) {
+  const brain = new Improviser(cfg.anthropicApiKey, { mode: 'guide' });
+  const w = new ImprovisedWalkthrough({
+    goal,
+    brain,
+    scan: scanFrontWindow,
+    fingerprint: screenFingerprint,
+    ask: (text) => askUser(text, 'live'),
+    thinking: () => win && win.webContents.send('guide-thinking'),
+    emit: (step) => {
+      if (improv !== w || !win) return;
+      console.log(`[improvise] ${step.status} ${step.stepNumber}:`, step.target ? step.target.label : '', step.say);
+      if (step.status === 'stuck') lastUnlearned = goal;
+      win.webContents.send('guide-step', stepPayload({ ...step, totalSteps: 0 }));
+      if (step.status !== 'step') stopGuide();
+    },
+  });
+  improv = w;
+  startInputHook();
+  setTimeout(() => w.start(), 150);
+  console.log(`[improvise] Friday has a go at "${goal}"`);
+  return { ok: true, guide: true, status: 'starting', say: '', title: '' };
+}
 ipcMain.on('guide-stop', () => stopGuide());
 
 // ---------- Jarvis: does learned tasks for you ----------
@@ -527,6 +604,38 @@ const hands = {
   },
   escape: () => act.escape(),
   scroll: (point, lines) => withPassThrough(() => act.scroll(point, lines)),
+  // Only web addresses, opened in the default browser.
+  openUrl: async (url) => {
+    const safe = cleanUrl(url);
+    if (!safe) throw new Error(`not a web address: ${url}`);
+    await shell.openExternal(safe);
+    console.log(`[jarvis] opened ${safe}`);
+  },
+  // Best matching file, opened with its usual app (no questions: he's mid-task).
+  openFile: async (query) => {
+    const [f] = await findFiles(query, { limit: 1 });
+    if (!f || f.blocked) return null;
+    const err = await shell.openPath(f.path);
+    console.log(`[jarvis] opened ${f.path}${err ? ` (failed: ${err})` : ''}`);
+    return err ? null : f.name;
+  },
+  // Best matching open window or tab, brought to the front.
+  switchTo: async (query) => {
+    const [best] = windows.rankOpen(query, await windows.listOpen());
+    if (!best || best.score < 0.6) return null;
+    await windows.bringToFront(best.item);
+    return windows.describe(best.item);
+  },
+  // Only apps installed in the Applications folders.
+  openApp: async (name) => {
+    const file = `${path.basename(String(name)).replace(/\.app$/i, '')}.app`;
+    const dirs = ['/Applications', '/System/Applications', '/System/Applications/Utilities', '/Applications/Utilities', path.join(app.getPath('home'), 'Applications')];
+    const found = dirs.map((d) => path.join(d, file)).find((p) => fs.existsSync(p));
+    if (!found) return false;
+    const err = await shell.openPath(found);
+    console.log(`[jarvis] opened ${found}${err ? ` (failed: ${err})` : ''}`);
+    return !err;
+  },
 };
 
 const OPEN_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:open|launch|start|pull up|bring up|load)\s+(?:up\s+)?(.+?)(?:\s+for me)?(?:\s+please)?$/i;
@@ -534,8 +643,63 @@ const CLICK_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:click|press|t
 // "open the File menu" is about the screen, not a file.
 const UI_WORDS = /\b(menu|tab|button|settings|preferences|window|panel|sidebar|dialog|dropdown|toolbar)\b/i;
 const LEARN_RE = /^(how (do|can|would|should) i|show me how|teach me|walk me through|guide me)\b/i;
+// "Switch to the budget spreadsheet": an open window or tab, brought to the front.
+const SWITCH_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:switch(?: back)? to|go(?: back)? to|bring (?:up|back)|focus(?: on)?|jump to|take me to|show me|get me|pull up|flip to|change to)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:window|tab))?(?:\s+for me)?(?:\s+please)?$/i;
+// "Where's my passport scan": find the file and show it in Finder.
+const FIND_RE = /^(?:please\s+)?(?:(?:can|could|would) you\s+)?(?:find|locate|where(?:'s| is| are)|where did i (?:put|save)|show me where)\s+(?:the\s+|my\s+)?(.+?)(?:\s+(?:is|are))?(?:\s+for me)?(?:\s+please)?$/i;
 
-async function askJarvis(text) {
+// The basics need no lesson: websites, web searches, typing and key presses.
+const URL_RE = /^(?:please\s+)?(?:go to|open|visit|pull up|bring up|navigate to|load)\s+((?:https?:\/\/)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/\S*)?)(?:\s+please)?$/i;
+const SEARCH_RE = /^(?:please\s+)?(?:search(?:\s+the\s+web|\s+google|\s+online)?(?:\s+for|\s+up)?|google|look up)\s+(.+?)(?:\s+for me)?(?:\s+please)?$/i;
+const TYPE_RE = /^(?:please\s+)?type\s+(?:out\s+)?(.+)$/i;
+const PRESS_RE = /^(?:please\s+)?(?:press|hit)\s+(.+?)(?:\s+for me)?$/i;
+
+async function jarvisBasics(text, p) {
+  const url = URL_RE.exec(text);
+  if (url) {
+    await hands.openUrl(url[1]);
+    return { ok: true, sayOnly: true, say: p.s(`Opening ${url[1].replace(/^https?:\/\//, '').replace(/\/$/, '')}{sir}.`) };
+  }
+  const search = SEARCH_RE.exec(text);
+  // "Search for shoes on Amazon" is a task on a site: that's for the best-effort path.
+  if (search && !/\s(on|in)\s+\S+$/i.test(search[1])) {
+    const q = search[1].replace(/^["']|["']$/g, '');
+    await hands.openUrl(`https://www.google.com/search?q=${encodeURIComponent(q)}`);
+    return { ok: true, sayOnly: true, say: p.s(`Searching for ${q}{sir}.`) };
+  }
+  const type = TYPE_RE.exec(text);
+  if (type) {
+    const t = type[1].replace(/^["'“]|["'”]$/g, '');
+    await refocusFrontApp();
+    await act.type(t);
+    console.log(`[jarvis] typed ${JSON.stringify(t)}`);
+    return { ok: true, sayOnly: true, say: p.s('Done{sir}.') };
+  }
+  const press = PRESS_RE.exec(text);
+  const keys = press && act.spokenShortcut(press[1]);
+  if (keys) {
+    if (riskOf({ kind: 'shortcut', keys }) && !isYes(await askUser(p.s(`That would press ${press[1]}. Shall I go ahead{sir}?`), 'jarvis-confirm'))) {
+      return { ok: true, sayOnly: true, say: p.s('Very good. I shall leave it.') };
+    }
+    await hands.keys(act.parseShortcut(keys));
+    console.log(`[jarvis] pressed ${keys}`);
+    return { ok: true, sayOnly: true, say: p.s('Done{sir}.') };
+  }
+  return null;
+}
+
+// Speech comes with "um"s and commas ("can you, um, find…"): drop them so the
+// request reads the way it was meant.
+function tidySpeech(text) {
+  return String(text || '')
+    .replace(/\b(um+|uh+|erm|er|hmm+|like)\b,?/gi, ' ')
+    .replace(/(\w),(\s)/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function askJarvis(raw) {
+  const text = tidySpeech(raw);
   const p = persona('jarvis', cfg);
   if (teach) return { ok: false, reason: 'busy', say: p.s("Friday is in the middle of a lesson{sir}. I'll wait until she's finished.") };
   stopGuide();
@@ -547,9 +711,34 @@ async function askJarvis(text) {
     return ask(text);
   }
 
-  const open = OPEN_RE.exec(text);
-  if (open && !UI_WORDS.test(open[1])) {
-    const res = await openFileRequest(open[1], p);
+  try {
+    const basic = await jarvisBasics(text, p);
+    if (basic) return basic;
+  } catch (err) {
+    console.error('[jarvis] basics', err.message);
+    return { ok: false, reason: 'error', say: p.s("I'm afraid macOS wouldn't let me do that{sir}. Check Accessibility and Automation in Privacy and Security.") };
+  }
+
+  // Something already open beats opening it again.
+  const find = FIND_RE.exec(text);
+  const sw = !find && SWITCH_RE.exec(text);
+  const open = !find && !sw && OPEN_RE.exec(text);
+  // "Find the window I had the meeting open in" is about what's open, not files.
+  if (find && /\b(window|tab|had\b.*\bopen|was\b.*\bopen|meeting|call)\b/i.test(find[1])) {
+    const res = await switchToWindow(find[1], p, { eager: true });
+    if (res) return res;
+  }
+  if (sw || open) {
+    const res = await switchToWindow((sw || open)[1], p, { eager: Boolean(sw) });
+    if (res) return res;
+  }
+  if ((open || sw) && !UI_WORDS.test((open || sw)[1])) {
+    const res = await openFileRequest((open || sw)[1], p);
+    if (res) return res;
+  }
+  if (find && !UI_WORDS.test(find[1])) {
+    // "Find the README and open it" opens it; plain "find…" shows it in Finder.
+    const res = await openFileRequest(find[1], p, { reveal: !/\band open\b/i.test(find[1]) });
     if (res) return res;
   }
 
@@ -581,13 +770,40 @@ async function askJarvis(text) {
     return jarvisClick(result.match, p);
   }
 
-  // Anything else: point at it, like Friday does.
+  // A short name of something on screen ("share", "the save button"): point at it.
   const result = findBest(text, scan.elements);
-  if (result.match && !result.match.hidden) {
+  if (result.match && !result.match.hidden && result.score >= 0.9 && text.split(/\s+/).length <= 4) {
     const m = result.match;
     return { ok: true, label: m.label, role: ROLE_NAMES[m.role] || 'thing', app: m.app || scan.app, rect: toLocal(m), say: p.s(`The ${m.label} ${ROLE_NAMES[m.role] || ''} is just there{sir}.`).replace(/ {2,}/g, ' ') };
   }
+
+  // Not taught: he has a go, and says honestly if he can't do it properly.
+  if (Guide.available(cfg)) return beginFreestyle(text);
   return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}. Friday can learn it from someone who knows how.") };
+}
+
+function beginFreestyle(goal) {
+  const p = persona('jarvis', cfg);
+  const run = new JarvisFreestyle({
+    goal,
+    improviser: new Improviser(cfg.anthropicApiKey, { mode: 'do', address: cfg.jarvis.address }),
+    s: p.s,
+    scan: scanFrontWindow,
+    act: hands,
+    ask: askUser,
+    emit: jarvisEmitter(() => run),
+  });
+  console.log(`[jarvis] having a go at "${goal}"`);
+  return launchJarvis(run, { title: goal, id: null });
+}
+
+// Steps, speech and where he's about to click, for the orb.
+function jarvisEmitter(getRun) {
+  return (ev) => {
+    if (!jarvisRun || jarvisRun.run !== getRun() || !win) return;
+    if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
+    else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
+  };
 }
 
 // Press one named button, with a yes first if it looks risky.
@@ -608,31 +824,91 @@ async function jarvisClick(el, p) {
   return { ok: true, sayOnly: true, home: true, say: p.s(`Done{sir}.`) };
 }
 
-// "Open the Q3 report": find it with Spotlight and open it in its usual app.
-// Returns null if nothing matches, so the request can be tried as something else.
-async function openFileRequest(what, p) {
-  let found;
+// "Which one: 1, …; 2, …?" -> the chosen item, or null.
+async function pickOne(items, label, p, question) {
+  const answer = await askUser(p.s(`${question} ${items.map((x, i) => `${i + 1}, ${label(x)}`).join('; ')}. Which one{sir}?`), 'jarvis-input');
+  if (!answer) return null;
+  const n = { one: 1, first: 1, '1': 1, two: 2, second: 2, '2': 2, three: 3, third: 3, '3': 3 }[(/\b(one|two|three|first|second|third|[123])\b/i.exec(answer) || [])[1]?.toLowerCase()];
+  if (n) return items[n - 1] || null;
+  const best = findBest(answer, items.map((x, i) => ({ label: label(x), role: 'AXButton', i })));
+  return best.match ? items[best.match.i] : null;
+}
+
+// "Switch to the budget spreadsheet": bring an open window or browser tab to the
+// front. Returns null when nothing open matches well enough, so the request can
+// be tried as a file. `eager` (an explicit "switch to") accepts looser matches.
+async function switchToWindow(what, p, { eager = false } = {}) {
+  let open;
   try {
-    found = await findFiles(what);
+    open = await windows.listOpen();
+  } catch (err) {
+    console.error('[jarvis] windows', err.message);
+    return null;
+  }
+  const ranked = windows.rankOpen(what, open);
+  const bar = eager ? 0.6 : 0.85;
+  const good = ranked.filter((x) => x.score >= bar);
+  console.log(`[jarvis] switch "${what}" →`, ranked.slice(0, 3).map((x) => `${windows.describe(x.item)} (${x.score.toFixed(2)})`).join(', ') || 'no name matches');
+  let choices = good.length ? good.filter((x) => x.score >= good[0].score - 0.05).slice(0, 3).map((x) => x.item) : [];
+
+  // Described rather than named ("the window I had the meeting in"): Claude reads what's open.
+  const described = eager || /\b(had|was|were|where|with|from|about)\b/i.test(what);
+  if (!choices.length && described && Guide.available(cfg)) {
+    try {
+      const r = await windows.pickWithClaude(cfg.anthropicApiKey, what, open);
+      console.log(`[jarvis] switch "${what}" (Claude) → ${r.match}:`, r.items.map(windows.describe).join(', '));
+      choices = r.items;
+    } catch (err) {
+      console.error('[jarvis] window pick', err.message);
+    }
+  }
+  if (!choices.length) return null;
+  let pick = choices[0];
+  if (choices.length > 1) {
+    pick = await pickOne(choices, windows.describe, p, `${choices.length} of those are open:`);
+    if (!pick) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
+  }
+  try {
+    await windows.bringToFront(pick);
+  } catch (err) {
+    console.error('[jarvis] switch', err.message);
+    return { ok: false, reason: 'error', say: p.s(`I couldn't bring ${windows.describe(pick)} forward{sir}.`) };
+  }
+  console.log(`[jarvis] brought forward: ${windows.describe(pick)}`);
+  return { ok: true, sayOnly: true, say: p.s(`${windows.describe(pick)[0].toUpperCase()}${windows.describe(pick).slice(1)}{sir}.`) };
+}
+
+// Where a file lives, said out loud: "in Documents", "in Projects inside Documents".
+function whereIs(file) {
+  const home = app.getPath('home');
+  const rel = path.relative(home, path.dirname(file));
+  if (!rel) return 'in your home folder';
+  const parts = rel.split(path.sep).filter((x) => x !== 'Library' && x !== 'Mobile Documents' && x !== 'com~apple~CloudDocs');
+  if (!parts.length) return 'in iCloud Drive';
+  return parts.length === 1 ? `in ${parts[0]}` : `in ${parts[parts.length - 1]}, inside ${parts[0]}`;
+}
+
+// "Open the Q3 report": find it with Spotlight and open it in its usual app (or
+// the one named: "…in Preview"). With reveal, show it in Finder instead.
+// Returns null if nothing matches, so the request can be tried as something else.
+async function openFileRequest(what, p, { reveal = false } = {}) {
+  let found;
+  const started = Date.now();
+  try {
+    found = await findFiles(what, { rephrase: Guide.available(cfg) ? makeRephrase(cfg.anthropicApiKey) : null });
   } catch (err) {
     console.error('[jarvis] file search', err.message);
     return null;
   }
-  console.log(`[jarvis] open "${what}" →`, found.map((f) => `${f.name} (${f.score.toFixed(2)}${f.blocked ? `, ${f.blocked}` : ''})`).join(', ') || 'nothing');
+  console.log(`[jarvis] ${reveal ? 'find' : 'open'} "${what}" (${Date.now() - started} ms) →`, found.map((f) => `${f.name} (${f.score.toFixed(2)}${f.remembered ? ', remembered' : ''}${f.blocked ? `, ${f.blocked}` : ''})`).join(', ') || 'nothing');
   if (!found.length) return null;
 
   let pick = found[0];
-  const close = found.filter((f) => f.score >= pick.score - 0.05);
-  if (close.length > 1) {
-    const names = close.slice(0, 3);
-    const answer = await askUser(
-      p.s(`I found ${names.length} likely candidates: ${names.map((f, i) => `${i + 1}, ${f.name}`).join('; ')}. Which one{sir}?`),
-      'jarvis-input'
-    );
-    if (!answer) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
-    const n = { one: 1, first: 1, '1': 1, two: 2, second: 2, '2': 2, three: 3, third: 3, '3': 3 }[(/\b(one|two|three|first|second|third|[123])\b/i.exec(answer) || [])[1]?.toLowerCase()];
-    pick = n ? names[n - 1] : findBest(answer, names.map((f) => ({ ...f, label: f.name, role: 'AXButton' }))).match;
-    if (!pick) return { ok: false, reason: 'not-found', say: p.s("I'm afraid I didn't catch which one{sir}.") };
+  if (!isClear(found, what)) {
+    const close = found.filter((f) => f.score >= found[0].score - 0.1).slice(0, 3);
+    pick = await pickOne(close, (f) => `${f.name} ${whereIs(f.path)}`, p, `I found ${close.length} likely candidates:`);
+    if (!pick) return { ok: true, sayOnly: true, say: p.s('Very good. Standing by.') };
+    rememberPick(what, pick.path); // next time, straight there
   }
 
   if (pick.blocked) {
@@ -642,13 +918,24 @@ async function openFileRequest(what, p) {
     console.log(`[jarvis] refused to open ${pick.path} (${pick.blocked})`);
     return { ok: false, reason: 'blocked', say: p.s(why) };
   }
-  const err = await shell.openPath(pick.path);
+  const nice = pick.name.replace(/\.[^.]+$/, '');
+  if (reveal) {
+    shell.showItemInFolder(pick.path);
+    console.log(`[jarvis] showed ${pick.path}`);
+    return { ok: true, sayOnly: true, say: p.s(`${nice} is ${whereIs(pick.path)}{sir}. I've shown it to you in Finder.`) };
+  }
+  // "…in Preview": only apps from the Applications folders.
+  const withApp = parseQuery(what).withApp;
+  const appPath = withApp && appRoots(app.getPath('home')).map((d) => path.join(d, `${path.basename(withApp)}.app`)).find((x) => fs.existsSync(x));
+  const err = appPath
+    ? await new Promise((resolve) => execFile('/usr/bin/open', ['-a', appPath, pick.path], (e) => resolve(e ? e.message : '')))
+    : await shell.openPath(pick.path);
   if (err) {
     console.error('[jarvis] open', pick.path, err);
     return { ok: false, reason: 'error', say: p.s(`I couldn't open "${pick.name}"{sir}.`) };
   }
-  console.log(`[jarvis] opened ${pick.path}`);
-  return { ok: true, sayOnly: true, say: p.s(`Opening ${pick.name.replace(/\.[^.]+$/, '')}{sir}.`) };
+  console.log(`[jarvis] opened ${pick.path}${appPath ? ` in ${appPath}` : ''}`);
+  return { ok: true, sayOnly: true, say: p.s(`Opening ${nice}${appPath ? ` in ${withApp}` : ''}{sir}.`) };
 }
 
 // Jarvis's plan for a skill (which values to ask for, what to confirm), made once.
@@ -665,8 +952,9 @@ async function jarvisPlan(id, skill, actions) {
 
 async function beginJarvis(id) {
   const p = persona('jarvis', cfg);
-  const skill = loadSkill(id);
+  let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}.") };
+  skill = await ensureRefined(id, skill);
 
   let recorded = null;
   try {
@@ -686,31 +974,24 @@ async function beginJarvis(id) {
   }
   if (!plan.can_run) return { ok: false, reason: 'declined', say: plan.why_not || p.s("I'm afraid that one needs a human touch{sir}.") };
 
-  const run = new JarvisRun({
-    skill,
-    actions,
-    plan,
-    s: p.s,
-    scan: scanFrontWindow,
-    act: hands,
-    ask: askUser,
-    emit: (ev) => {
-      if (!jarvisRun || jarvisRun.run !== run || !win) return;
-      if (ev.type === 'point') win.webContents.send('jarvis-step', { rect: toLocal(ev.target), label: ev.target.label });
-      else win.webContents.send('jarvis-step', { say: ev.say || '', stepNo: ev.stepNo || 0, totalSteps: ev.totalSteps || 0 });
-    },
-  });
+  const run = new JarvisRun({ skill, actions, plan, s: p.s, scan: scanFrontWindow, act: hands, ask: askUser, emit: jarvisEmitter(() => run) });
+  console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
+  return launchJarvis(run, { title: skill.map.title, id });
+}
+
+// Start a run (learned or best effort) and clean up after it, whatever happens.
+function launchJarvis(run, { title, id }) {
   jarvisRun = { run, id };
   startInputHook();
   if (tray) tray.setContextMenu(buildTrayMenu());
-  if (win) win.webContents.send('jarvis-state', { running: true, title: skill.map.title, totalSteps: run.total });
-  console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
+  if (win) win.webContents.send('jarvis-state', { running: true, title, totalSteps: run.total });
 
   // Let the renderer switch into Jarvis mode before the first question arrives.
   setTimeout(async () => {
     const result = await run.run();
-    console.log(`[jarvis] "${skill.map.title}" ended: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
+    console.log(`[jarvis] "${title}" ended: ${result.status}${result.reason ? ` (${result.reason})` : ''}`);
     if (result.error && result.reason === 'ACCESSIBILITY') systemPreferences.isTrustedAccessibilityClient(true);
+    if (result.status === 'needs_teaching') lastUnlearned = title;
     saveRunLog(id, run, result);
     if (jarvisRun && jarvisRun.run === run) jarvisRun = null;
     // A newer run may have taken over (a new request stops the old one): leave it be.
@@ -720,7 +1001,7 @@ async function beginJarvis(id) {
     if (tray) tray.setContextMenu(buildTrayMenu());
     if (win) win.webContents.send('jarvis-state', { running: false, status: result.status, say: result.say });
   }, 200);
-  return { ok: true, jarvis: true, title: skill.map.title, totalSteps: run.total };
+  return { ok: true, jarvis: true, title, totalSteps: run.total };
 }
 
 function stopJarvis(reason = 'stopped') {
@@ -732,7 +1013,8 @@ function stopJarvis(reason = 'stopped') {
 // Every run is written down next to the skill: what he asked, what he did, how it ended.
 function saveRunLog(id, run, result) {
   try {
-    const dir = path.join(skillDir(id), 'runs');
+    // Best-effort runs (no skill) are kept together in one folder.
+    const dir = id ? path.join(skillDir(id), 'runs') : path.join(app.getPath('userData'), 'jarvis-runs');
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date(run.startedAt || Date.now()).toISOString().replace(/[:.]/g, '-');
     fs.writeFileSync(path.join(dir, `${stamp}.json`), JSON.stringify({ skill: run.skill.map.title, startedAt: run.startedAt, status: result.status, reason: result.reason || '', log: run.log }, null, 2));
@@ -778,6 +1060,7 @@ function startInputHook() {
     const p = screen.getCursorScreenPoint();
     if (teach) teach.session.onMouseDown(p.x, p.y);
     if (replay) replay.onMouseDown(p.x, p.y);
+    if (improv) improv.onInput();
     // You clicking somewhere yourself while Jarvis works stops him.
     if (jarvisRun) jarvisRun.run.onUserClick();
   });
@@ -788,6 +1071,7 @@ function startInputHook() {
     const keys = shortcutName(e);
     if (teach) teach.session.onKey(keys);
     if (replay) replay.onKey(keys);
+    if (improv) improv.onInput();
   });
   uIOhook.start();
   hookRunning = true;
@@ -850,7 +1134,9 @@ function startTeach(title) {
     win.webContents.send('say', { text: 'I need an Anthropic API key to learn. Add ANTHROPIC_API_KEY to the .env file.', mood: 'worried' });
     return;
   }
-  const name = (title || '').trim() || 'Untitled task';
+  // "Let me show you" after a "needs teaching" teaches exactly that.
+  const name = (title || '').trim() || lastUnlearned || 'Untitled task';
+  lastUnlearned = '';
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const dir = path.join(app.getPath('userData'), 'workmaps', `${stamp}-${slug(name)}`);
   fs.mkdirSync(path.join(dir, 'frames'), { recursive: true });
@@ -894,7 +1180,8 @@ async function finishTeach() {
     replayPlan(path.basename(dir), { map, session: session.toJSON() }).catch((err) => console.error('[teach] replay plan', err.message));
     openHub(path.basename(dir));
     const judg = map.steps.filter((s) => s.is_judgment).length;
-    win.webContents.send('say', { text: `Got it. Your Work Map has ${map.steps.length} steps and ${judg} judgment calls. I've opened it for you.`, mood: 'happy' });
+    const tidied = (map.cleanup_notes || []).length ? ' I tidied it up so anyone can follow it from wherever they start.' : '';
+    win.webContents.send('say', { text: `Got it. Your Work Map has ${map.steps.length} steps and ${judg} judgment calls.${tidied} I've opened it for you.`, mood: 'happy' });
   } catch (err) {
     console.error('[teach] finish', err);
     fs.writeFileSync(path.join(dir, 'session.json'), JSON.stringify(session.toJSON(), null, 2));
@@ -1123,6 +1410,7 @@ if (!firstInstance) {
 
 if (firstInstance) app.whenReady().then(() => {
   cfg = loadConfig(app.getPath('userData'));
+  setPicksFile(path.join(app.getPath('userData'), 'file-picks.json'));
   console.log('[config] loaded from', cfg.loadedFrom.length ? cfg.loadedFrom.join(', ') : '(no .env found)');
   console.log('[config] guide:', Guide.available(cfg) ? 'on (Claude)' : 'off (no ANTHROPIC_API_KEY)');
   console.log('[config] voice:', cfg.voiceEnabled ? (cfg.elevenLabs.apiKey ? 'ElevenLabs' : 'system fallback (no ELEVENLABS_API_KEY)') : 'off');
