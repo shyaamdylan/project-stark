@@ -331,8 +331,21 @@ body[data-agent='jarvis'] #reactor {
   content: attr(data-placeholder);
   color: #8a96b0;
 }
-#buddy.hearing .heard {
+#buddy.hearing .heard,
+.heard:focus {
   border-color: var(--accent);
+}
+/* The answer box takes typing too. */
+#answer-input {
+  cursor: text;
+  outline: none;
+  user-select: text;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+#answer-input:focus {
+  font-style: normal;
 }
 .answer-actions {
   display: flex;

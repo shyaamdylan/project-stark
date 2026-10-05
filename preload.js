@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('buddy', {
   speak: (text) => ipcRenderer.invoke('speak', text),
   setInteractive: (on) => ipcRenderer.send('set-interactive', on),
   openPrompt: () => ipcRenderer.send('open-prompt'),
+  focusOverlay: () => ipcRenderer.send('focus-overlay'),
   promptClosed: () => ipcRenderer.send('prompt-closed'),
   guideNext: () => ipcRenderer.send('guide-next'),
   guideStop: () => ipcRenderer.send('guide-stop'),

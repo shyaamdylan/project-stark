@@ -50,6 +50,7 @@ const state = {
   lastSpoken: '',
   lastSpokenAt: 0,
   answering: null, // id of the question being answered
+  typingAnswer: false, // they clicked the answer box to type instead of talking
   pointerAt: null, // where the cursor is pointing, while it's out of the orb
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
@@ -775,6 +776,7 @@ window.buddy.on('jarvis-state', (j) => {
 window.buddy.on('question-cancel', () => {
   if (!state.answering) return;
   state.answering = null;
+  stopTyping();
   clearTimeout(autoSendTimer);
   answerForm.classList.add('hidden');
   bubble.classList.remove('wide');
@@ -856,17 +858,59 @@ window.buddy.on('teach-question', ({ id, text, phase }) => {
   bubble.classList.toggle('wide', phase === 'teach-back' || text.length > 120);
   answerPhase.textContent = PHASES[phase] || (phase.startsWith('debrief') ? `Debrief · ${phase.split(' ')[1]}` : '');
   answerInput.textContent = '';
-  answerInput.dataset.placeholder = ANSWER_HINTS[phase] || 'Listening… just answer out loud';
+  stopTyping();
+  answerInput.dataset.placeholder = ANSWER_HINTS[phase] || 'Listening… answer out loud, or click to type';
   answerForm.classList.remove('hidden');
   updateMic();
   flare();
   say(text, { mood: 'happy' });
 });
 
+// Typing an answer: the box takes the keyboard, and nothing is sent until
+// Enter (no auto-send on a pause). Speech still adds to it.
+function startTyping() {
+  if (!state.answering || state.typingAnswer) return;
+  state.typingAnswer = true;
+  clearTimeout(autoSendTimer);
+  window.buddy.focusOverlay();
+  setTimeout(() => {
+    answerInput.focus();
+    // Cursor at the end of anything already heard.
+    const r = document.createRange();
+    r.selectNodeContents(answerInput);
+    r.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }, 30);
+}
+
+// Give the keyboard back to the app they were using.
+function stopTyping() {
+  if (!state.typingAnswer) return;
+  state.typingAnswer = false;
+  answerInput.blur();
+  window.buddy.promptClosed();
+}
+
+answerInput.addEventListener('mousedown', startTyping);
+answerInput.addEventListener('focus', startTyping);
+answerInput.addEventListener('input', () => clearTimeout(autoSendTimer));
+answerInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendAnswer(answerInput.textContent);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    stopTyping();
+  }
+});
+
 function sendAnswer(value) {
   if (!state.answering) return;
   const id = state.answering;
   state.answering = null;
+  stopTyping();
   stopSpeaking();
   clearTimeout(autoSendTimer);
   answerForm.classList.add('hidden');
@@ -962,6 +1006,8 @@ async function heard(wav, clip = {}) {
   if (state.answering) {
     answerInput.textContent = `${answerInput.textContent} ${text}`.trim();
     clearTimeout(autoSendTimer);
+    // While they're typing, speech just adds to the box; Enter sends.
+    if (state.typingAnswer) return;
     autoSendTimer = setTimeout(() => {
       if (state.answering && !Mic.isSpeaking()) sendAnswer(answerInput.textContent);
     }, 2000);
@@ -1122,7 +1168,7 @@ window.buddy.on('listen', ({ mode }) => startListening(mode));
 // `forward: true` we still receive mousemove, so flip as the cursor enters.
 document.addEventListener('mousemove', (e) => {
   const over = !!e.target.closest('.hit');
-  const want = over || state.promptOpen;
+  const want = over || state.promptOpen || state.typingAnswer;
   if (want !== state.interactive) {
     state.interactive = want;
     window.buddy.setInteractive(want);
