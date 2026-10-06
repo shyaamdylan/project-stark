@@ -24,7 +24,7 @@ const { imageBlock, boxToScreen, screenshotNote, POINT_SCHEMA } = require('./vis
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 20;
-const KEEP_SCREENS = 2; // older screens are dropped from the conversation to keep it quick
+const KEEP_SCREENS = 1; // only the latest turn carries the screen; older turns never change, so they cache
 
 const HONESTY = `You haven't been taught this task by an expert, so you rely on general knowledge of macOS, common apps and websites, and what's on screen. Be genuinely helpful, and honest.
 
@@ -128,8 +128,10 @@ class Improviser {
     this.inFlight = false;
   }
 
-  // Older screens are replaced by a placeholder and long older notes (a file's
-  // text) are trimmed: the latest ones are what matter.
+  // Only the latest turn carries the screen (list and screenshot); every
+  // earlier turn is shown the same way on every call from then on, so the whole
+  // history before it is a stable prefix that comes from the prompt cache. The
+  // cache marker sits on the previous reply.
   messages() {
     const out = [];
     const last = this.turns.length - 1;
@@ -137,11 +139,10 @@ class Improviser {
       const recent = i >= this.turns.length - KEEP_SCREENS;
       const note = recent || t.note.length <= 2500 ? t.note : `${t.note.slice(0, 2500)}\n…(trimmed)`;
       const text = `${note}\n\n${recent ? `On screen now:\n${t.screen}` : '(screen from earlier omitted)'}`;
-      // Only the latest screenshot is sent: older ones cost tokens and are out of date.
       if (i === last && t.image) {
         out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `${screenshotNote(t.image)}\n${text}` }] });
       } else out.push({ role: 'user', content: t.image ? `${text}\n(screenshot from then omitted)` : text });
-      if (t.reply) out.push({ role: 'assistant', content: t.reply });
+      if (t.reply) out.push({ role: 'assistant', content: [{ type: 'text', text: t.reply, ...(i === last - 1 ? { cache_control: { type: 'ephemeral' } } : {}) }] });
     });
     return out;
   }

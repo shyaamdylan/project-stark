@@ -405,3 +405,14 @@ npm run demo-app   # then open http://localhost:4173
 - **Reset sandbox** (bottom left) puts the current data set back for the next take.
 - Everything is made up and stays in the browser (localStorage); nothing is sent anywhere.
 
+## Keeping it cheap
+
+- Every Claude call logs its tokens and an estimated cost (`[tokens] …` in the terminal and session
+  log, `src/usage.js`), and a per-kind summary prints when you quit, so you can see where it goes.
+- With a screenshot alongside, the list of what's on screen keeps only what can be clicked plus short
+  text (at most 160 items); the picture shows the rest.
+- Screenshots go at 1280 px on the long side (`SCREENSHOT_PX`), about 1,300 tokens for a whole screen.
+- Lessons and walkthroughs keep their history append-only, so everything before the latest turn
+  comes from the prompt cache.
+- Common voice lines are made once and kept on disk.
+

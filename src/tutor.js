@@ -21,7 +21,7 @@ const { imageBlock, boxToScreen, screenshotNote, POINT_SCHEMA } = require('./vis
 
 const MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 40;
-const KEEP_SCREENS = 2;
+const KEEP_SCREENS = 1; // only the latest turn carries the screen; older turns never change, so they cache
 
 const SYSTEM = `You are Friday, a warm, sharp teacher who lives as a small glowing orb on someone's Mac. You're teaching them a task an expert showed you (the lesson plan below). This is a real lesson, a two-way conversation, not a click-through tutorial.
 
@@ -198,7 +198,10 @@ class Tutor {
       // Only the latest screenshot goes: older ones cost tokens and are out of date.
       if (i === last && t.image) out.push({ role: 'user', content: [imageBlock(t.image), { type: 'text', text: `${screenshotNote(t.image)}\n${text}` }] });
       else out.push({ role: 'user', content: text });
-      if (t.reply) out.push({ role: 'assistant', content: t.reply });
+      // The cache marker on the previous reply: everything up to it (the lesson
+      // plan, every earlier turn) is the same on every call, so it's read from
+      // the prompt cache instead of paid for again.
+      if (t.reply) out.push({ role: 'assistant', content: [{ type: 'text', text: t.reply, ...(i === last - 1 ? { cache_control: { type: 'ephemeral' } } : {}) }] });
     });
     return out;
   }

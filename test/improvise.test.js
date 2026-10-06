@@ -265,3 +265,21 @@ test('Jarvis: a possibly related learned skill is given as reference', async () 
   assert.match(brain.notes[0], /An expert taught you a task that may be this one/);
   assert.match(brain.notes[0], /1\. Open the maker: Click New widget \(Rule: Always blue\)/);
 });
+
+test('history is append-only, so what one call caches is exactly the start of the next', async () => {
+  const { Improviser } = require('../src/improvise');
+  const sent = [];
+  const client = { beta: { messages: { create: async (req) => (sent.push(JSON.parse(JSON.stringify(req))), { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ status: 'step', say: 'Next.', summary: '', action: { kind: 'none', target_id: null, text: null, folder: null, point: null } }) }] }) } } };
+  const b = new Improviser('k', { mode: 'guide', client });
+  const scan = (n) => ({ app: 'Acme', elements: [{ role: 'AXButton', label: `Button ${n}`, app: 'Acme', x: 10, y: 10 * n, w: 50, h: 20 }] });
+  const image = { data: 'SU1H', width: 100, height: 80, frame: { x: 0, y: 0, w: 100, h: 80 } };
+  for (let n = 1; n <= 4; n++) await b.next(`turn ${n}`, scan(n), image);
+  const strip = (m) => JSON.stringify(m, (k, v) => (k === 'cache_control' ? undefined : v));
+  // The first call has no earlier reply to mark; from the second on, each does.
+  for (let k = 2; k < sent.length; k++) {
+    const prev = sent[k - 1].messages;
+    const marked = prev.findIndex((m) => Array.isArray(m.content) && m.content.some((b) => b.cache_control));
+    assert.ok(marked > 0, `call ${k} marks its history`);
+    assert.equal(strip(sent[k].messages.slice(0, marked + 1)), strip(prev.slice(0, marked + 1)), `call ${k + 1} starts with what call ${k} cached`);
+  }
+});
