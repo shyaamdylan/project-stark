@@ -184,6 +184,8 @@ if a lesson or question is still open; the next thing that happens brings it str
 It wakes the moment it hears its name: "Hey Friday" is spotted in the first second and a half of
 what you say, while you're still talking, and the dim dot swells into the orb straight away.
 `ORB_PLACE=float` brings back the orb floating just inside the corner.
+In Mission Control it stays exactly where it is while every other window shrinks, like the menu
+bar (a "stationary" window, set through `koffi`; no native build step).
 
 ### In the notch
 

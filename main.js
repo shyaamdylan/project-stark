@@ -61,6 +61,7 @@ const { findBest, normalize } = require('./src/matcher');
 const voice = require('./src/voice');
 const { findNotches, overlayLayout } = require('./src/notch');
 const { checkOtherAudio } = require('./src/macaudio');
+const { makeStationary } = require('./src/stationary');
 const { relocate, anchorFor, followAnchor, moved } = require('./src/track');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
@@ -118,6 +119,9 @@ function createWindow() {
   // Keep the orb out of screenshots (ours and screen sharing) without hiding it.
   win.setContentProtection(true);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Stay put in Mission Control, like the menu bar (set after the line above,
+  // which rewrites the window's collection behaviour).
+  if (makeStationary(win)) console.log('[overlay] the orb stays in its corner in Mission Control');
   win.setIgnoreMouseEvents(true, { forward: true });
   // Everything the orb says or points at goes in the session log (text mode prints its own).
   if (!textMode.enabled()) {
