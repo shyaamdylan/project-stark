@@ -273,7 +273,7 @@ class Tutor {
     if (ctx.spotting) parts.push(SPOTTING);
     if (this.notes.length) parts.push(`Since your last turn:\n${this.notes.splice(0).map((n) => `- ${n}`).join('\n')}`);
     parts.push(
-      `Where the lesson is: step ${l.stepNumber || '?'} of ${l.totalSteps || '?'}. Current instruction: "${l.line || ''}"${l.skipped && l.skipped.length ? `. Steps they've chosen to skip: ${l.skipped.join(', ')}` : ''}.`,
+      `Where the lesson is: step ${l.stepNumber || '?'} of ${l.totalSteps || '?'}. Current instruction: "${l.line || ''}"${l.skipped && l.skipped.length ? `. Steps they've chosen to skip: ${l.skipped.join(', ')}` : ''}${l.chosen && l.chosen.length ? `. Options they've taken: ${l.chosen.join('; ')}` : ''}.`,
       `What they've done since you last spoke:\n${ctx.did && ctx.did.length ? ctx.did.map((x) => `- ${x}`).join('\n') : '- nothing'}`,
       `Where they are: ${ctx.where || 'unknown'}`,
       (TRIGGERS[ctx.trigger] || ((d) => d))(ctx.detail)
@@ -329,6 +329,10 @@ const CHEER_EVERY_STEPS = 3;
 const CHEER_GAP_MS = 45000;
 const CHEERS = ['Looking good so far.', "That's all going the right way.", 'Nice and steady, keep going.', "You're doing this right."];
 
+// "Skip", "skip that", "not doing that one": leave out the step they're on (and
+// the rest of its option, at a fork). Anything longer goes to the tutor.
+const SKIP_WORDS = /^(?:(?:ok(?:ay)?|no|nah|right)[\s,.!]*)*(?:skip(?: (?:it|that|this|this one|that one|this step|that step|that bit|this bit))?|not (?:doing|needed|needing) (?:that|this)(?: one| bit)?)(?:[\s,.!]+(?:please|thanks|for now))*[\s.!]*$/i;
+
 // The lesson: the replay for speed, the observer for awareness, the tutor for judgment.
 class Lesson {
   // deps:
@@ -349,7 +353,9 @@ class Lesson {
     this.flags = 0; // things flagged (wrong decisions, guardrails), for the wrap-up
     this.snap = snap;
     this.skill = skill;
-    this.emitOut = emit;
+    // Every step says where it is on the path they're taking ("Step 4 of 8"),
+    // not in the whole map with every fork's options.
+    this.emitOut = (step) => emit(step && step.stepNumber && this.replay ? { ...step, ...this.replay.shown(step.stepNumber) } : step);
     this.thinking = thinking;
     this.tutor = tutor;
     this.idleMs = idleMs;
@@ -508,6 +514,10 @@ class Lesson {
   onUserSays(text) {
     if (!this.running || !String(text || '').trim()) return;
     if (DONE_WORDS.test(String(text).trim())) return this.done();
+    if (SKIP_WORDS.test(String(text).trim())) {
+      clearTimeout(this.timer);
+      return this.replay.skipHere();
+    }
     clearTimeout(this.timer);
     this.ask('said', String(text).trim());
   }

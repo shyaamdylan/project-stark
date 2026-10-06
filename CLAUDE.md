@@ -44,6 +44,11 @@ check of which step they're on (nothing said). Questions ("is that right?") go t
 it's spotting, with each checked decision as a fact. A right decision earns the expert's reason as
 approval, and a run of quiet steps a short word now and then.
 
+Forks (`src/forks.js`): a step that only belongs to one option of a choice has `only_if` in the
+Work Map. What the user asked for may settle it (`decideForks`); otherwise a lesson offers it
+("Only if you want…", "skip" or moving past drops the whole option) and Jarvis asks yes/no.
+Step counts are along the path taken (`progress`), never the whole map.
+
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
 

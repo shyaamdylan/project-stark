@@ -15,6 +15,7 @@
 
 const { findBest, normalize } = require('./matcher');
 const { follow } = require('./track');
+const { optionOf, branchOf, progress } = require('./forks');
 
 const RETRY_MS = 2500; // how long to keep looking for a target before asking Claude
 const SETTLE_MS = 900; // a field must stop changing this long to count as filled in
@@ -74,12 +75,14 @@ function buildActions(skill, plan) {
 
 // What to say for an action. The first action of a step uses the Work Map's own
 // wording and the expert's reason; follow-ups within the step are short.
-function lineFor(action, skill) {
+function lineFor(action, skill, opts = {}) {
   if (action.say) return action.say;
   const step = skill.map.steps[action.stepIndex];
   if (action.first) {
     let line = step.action.trim();
     if (step.is_judgment && step.reason) line += ` ${step.reason.trim()}`;
+    // One option at a fork, not decided yet: offered, not instructed.
+    if (optionOf(step) && !opts.chosen?.has(optionOf(step))) line = `Only if you want ${optionOf(step)}: ${line} Otherwise say skip.`;
     return line;
   }
   if (action.kind === 'go') return `Now get to ${action.destination ? action.destination.name : 'the next screen'}.`;
@@ -164,6 +167,7 @@ class Replay {
     this.wakeScan = null;
     this.aheadAtStart = new Set(); // later actions already on screen when this one was pointed at
     this.skipped = new Set(); // step indexes the user chose to leave out
+    this.chosen = new Set(); // options at a fork they've taken (src/forks.js)
     this.progressAt = Date.now(); // when an action was last completed
     // Set by a tutor (src/tutor.js) to hear about the user going off the path:
     //   onOffPath(why)  they did something other than the current action
@@ -344,7 +348,7 @@ class Replay {
     );
     this.emit({
       status: 'step',
-      say: say != null ? say : lineFor(a, this.skill),
+      say: say != null ? say : lineFor(a, this.skill, { chosen: this.chosen }),
       note: noteFor(a, this.skill),
       target: this.target,
       stepNumber: a.stepIndex + 1,
@@ -361,11 +365,17 @@ class Replay {
   // The next few actions with something to find on screen (not past a "go").
   upcoming() {
     const out = [];
-    for (let i = this.index + 1; i < this.actions.length && out.length < LOOK_AHEAD; i++) {
+    let limit = LOOK_AHEAD;
+    for (let i = this.index + 1; i < this.actions.length && out.length < limit; i++) {
       const a = this.actions[i];
       if (a.kind === 'go') break;
       if (this.skipped.has(a.stepIndex)) continue;
-      if (a.label && a.kind !== 'shortcut') out.push(i);
+      if (!a.label || a.kind === 'shortcut') continue;
+      out.push(i);
+      // An option nobody's taken yet doesn't use up the look-ahead: what comes
+      // after it is where someone not taking it goes next.
+      const o = optionOf(this.skill.map.steps[a.stepIndex]);
+      if (o && !this.chosen.has(o)) limit++;
     }
     return out;
   }
@@ -419,6 +429,7 @@ class Replay {
         }
       }
       if (ahead > this.index) {
+        this.settleForks(ahead);
         this.index = ahead;
         this.recoveries = 0;
         this.progressAt = Date.now();
@@ -516,6 +527,7 @@ class Replay {
         if (later.kind !== 'click') continue;
         const t = locate(later, this.latest.elements);
         if (t && inside(x, y, t)) {
+          this.settleForks(i);
           this.index = i;
           this.target = t;
           return this.complete(120);
@@ -540,14 +552,56 @@ class Replay {
   }
 
   // Leave out whole steps (1-based), e.g. a mode the user chose not to try.
+  // A step that's one option at a fork takes the rest of that option with it.
   skipSteps(numbers) {
-    for (const n of numbers || []) if (Number.isInteger(n) && n >= 1 && n <= this.total) this.skipped.add(n - 1);
+    for (const n of numbers || []) if (Number.isInteger(n) && n >= 1 && n <= this.total) for (const i of branchOf(this.skill.map, n - 1)) this.skipped.add(i);
+  }
+
+  // "Skip" said or typed: leave out the step they're on (all of it, and the
+  // rest of its option at a fork) and carry on.
+  skipHere() {
+    if (!this.running || this.recovering || this.judging || !this.action) return;
+    this.skipSteps([this.action.stepIndex + 1]);
+    this.point();
+  }
+
+  // Moving on to action `to` some other way than finishing this one: an option
+  // passed over without being taken is left out as a whole; landing inside an
+  // option takes it.
+  settleForks(to) {
+    const steps = this.skill.map.steps;
+    const dest = this.actions[to] ? this.actions[to].stepIndex : steps.length;
+    const taken = optionOf(steps[dest]);
+    if (taken) this.chosen.add(taken);
+    for (let i = this.action ? this.action.stepIndex : 0; i < dest; i++) {
+      const o = optionOf(steps[i]);
+      if (o && !this.chosen.has(o)) this.skipSteps([i + 1]);
+    }
+  }
+
+  // Options already settled by what they asked for (decideForks): Map option ->
+  // 'take' | 'leave' | 'ask'.
+  decide(decisions) {
+    for (const [option, d] of decisions || []) {
+      if (d === 'take') this.chosen.add(option);
+      if (d === 'leave') {
+        const i = this.skill.map.steps.findIndex((st) => optionOf(st) === option);
+        if (i >= 0) this.skipSteps([i + 1]);
+      }
+    }
+  }
+
+  // "Step n of m" along the path they're on (src/forks.js).
+  shown(stepNumber) {
+    const p = progress(this.skill.map, Math.max(0, (stepNumber || 1) - 1), { skipped: this.skipped, chosen: this.chosen });
+    return { shownStep: p.n, shownTotal: p.of };
   }
 
   // Carry on from the first action of a step (1-based), saying `say` instead of the scripted line.
   async jumpToStep(n, { say = null, target = null } = {}) {
     const at = this.actions.findIndex((x) => x.stepIndex === n - 1 && !this.skipped.has(x.stepIndex));
     if (at < 0 || !this.running) return false;
+    if (at > this.index) this.settleForks(at);
     this.index = at;
     this.recoveries = 0;
     await this.freshScan();
@@ -559,7 +613,7 @@ class Replay {
   where() {
     const a = this.action;
     if (!a) return null;
-    return { stepNumber: a.stepIndex + 1, totalSteps: this.total, line: lineFor(a, this.skill), target: this.target ? this.target.label : a.label || null, skipped: [...this.skipped].map((i) => i + 1) };
+    return { stepNumber: a.stepIndex + 1, totalSteps: this.total, line: lineFor(a, this.skill, { chosen: this.chosen }), target: this.target ? this.target.label : a.label || null, skipped: [...this.skipped].map((i) => i + 1), chosen: [...this.chosen] };
   }
 
   async complete(delay = 0) {
@@ -567,6 +621,9 @@ class Replay {
     this.completing = true;
     this.recoveries = 0;
     this.progressAt = Date.now();
+    // Doing a step that's one option at a fork is taking that option.
+    const did = this.action && !this.skipped.has(this.action.stepIndex) && optionOf(this.skill.map.steps[this.action.stepIndex]);
+    if (did) this.chosen.add(did);
     this.index++;
     // Past any steps the user chose to leave out.
     while (this.index < this.actions.length && this.skipped.has(this.actions[this.index].stepIndex)) this.index++;

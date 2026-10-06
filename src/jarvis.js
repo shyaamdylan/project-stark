@@ -22,6 +22,7 @@ const { describeEvent } = require('./apprentice');
 const { findBest, normalize } = require('./matcher');
 const { locate, atDestination, nextTargetVisible } = require('./replay');
 const { parseShortcut } = require('./act');
+const { forksOf, progress } = require('./forks');
 
 const MODEL = 'claude-opus-5-5';
 
@@ -150,6 +151,7 @@ function describeSkillForJarvis(skill, actions) {
   const events = new Map((session.events || []).map((e) => [e.id, e]));
   const steps = map.steps.map((s, i) => {
     const lines = [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`];
+    if (s.only_if) lines.push(`  Only if they want ${s.only_if} (one option at a fork)`);
     if (s.decision) lines.push(`  Decision: ${s.decision}`);
     if (s.reason) lines.push(`  Expert's reason: "${s.reason}"`);
     if (s.rule) lines.push(`  Rule: ${s.rule}`);
@@ -168,6 +170,7 @@ You are about to carry out a task on the user's Mac for them by clicking and typ
 
 Work out:
 - can_run: false if this can't be done safely by clicking and typing for the user: it needs a physical action, signing in, passwords or payment details, or a judgment call that has no stated rule and no value the user could simply give you. why_not: one sentence, in character, saying why (else "").
+- Steps marked "Only if they want …" are one option at a fork. Whether to do them is settled separately before you start (from the request, or a yes/no question), so never ask about that in inputs; plan their actions like any others.
 - inputs: what you must ask the user before starting because it's specific to this case: which item to pick, a value that changes each time, or the outcome of a judgment step. Each is one short spoken question, in character, under 22 words. For a judgment step, ask for the value and briefly mention the expert's rule so the user can decide. Never ask for passwords, card numbers or codes. Use ids like "i1". Keep it to what's truly needed; none is fine.
 - actions: exactly one entry per action, by index. For an "edit": value_from "recorded" when the expert's value would be the same every time (a fixed setting), or "input" with input_id when it depends on the case. For a "pick the case-specific item" action: value_from "input" with the input_id that says what to pick. Otherwise value_from "none" and input_id null.
   confirm: true for anything hard to undo or that affects other people (sending, submitting, paying, deleting, publishing, approving), and where a guardrail says to stop and ask. confirm_line: the spoken check, in character, ending in a question (else "").
@@ -271,7 +274,12 @@ class JarvisRun {
   //   ask(text, phase) -> the user's answer ('' if skipped or cancelled)
   //   emit(ev)  { type: 'step' | 'point' | 'say', say, stepNo, totalSteps, target }
   //   wait(ms)  (tests pass a fast one, and a short findMs)
-  constructor({ skill, actions, plan, s = (x) => x.replace(/\{sir\}/g, ''), scan, act, ask, emit = () => {}, wait, findMs = FIND_MS }) {
+  //   forks     Map option -> 'take' | 'leave' | 'ask' (decideForks, src/forks.js);
+  //             options missing or 'ask' are asked as a yes/no before starting
+  constructor({ skill, actions, plan, forks = new Map(), s = (x) => x.replace(/\{sir\}/g, ''), scan, act, ask, emit = () => {}, wait, findMs = FIND_MS }) {
+    this.forks = forks;
+    this.skipped = new Set(); // steps of options not taken
+    this.chosen = new Set();
     this.findMs = findMs;
     this.skill = skill;
     this.actions = actions;
@@ -300,7 +308,7 @@ class JarvisRun {
   }
 
   get total() {
-    return this.skill.map.steps.length;
+    return progress(this.skill.map, 0, { skipped: this.skipped, chosen: this.chosen }).of;
   }
 
   record(entry) {
@@ -484,8 +492,23 @@ class JarvisRun {
       return { status: 'declined', say: plan.why_not || this.s("I'm afraid that one needs a human touch{sir}.") };
     }
 
-    // 1. Ask for what's specific to this case.
-    for (const input of plan.inputs) {
+    // 1. Which way at each fork: what they asked for, or a yes/no now.
+    for (const { option, steps } of forksOf(this.skill.map)) {
+      let take = this.forks.get(option);
+      if (take !== 'take' && take !== 'leave') {
+        const answer = await this.ask(this.s(`Would you like ${option} as well{sir}?`), 'jarvis-input');
+        take = isYes(answer) ? 'take' : 'leave';
+        this.record({ kind: 'input', detail: `option: ${option}`, value: answer });
+      }
+      if (take === 'take') this.chosen.add(option);
+      else for (const i of steps) this.skipped.add(i);
+    }
+    const doing = (i) => !this.skipped.has(this.actions[i].stepIndex);
+    // Values only the left-out steps would use aren't asked for.
+    const needed = new Set(plan.actions.filter((p, i) => doing(i) && p.input_id).map((p) => p.input_id));
+
+    // 2. Ask for what's specific to this case.
+    for (const input of plan.inputs.filter((x) => needed.has(x.id))) {
       const answer = await this.ask(input.question, 'jarvis-input');
       if (!answer) {
         this.stop('declined');
@@ -495,24 +518,25 @@ class JarvisRun {
       this.record({ kind: 'input', detail: input.question, value: this.inputs[input.id] });
     }
 
-    // 2. Say what he's about to do and wait for a yes.
+    // 3. Say what he's about to do and wait for a yes.
     const summary = plan.summary || `I'll ${this.skill.map.title.toLowerCase()}.`;
     if (!(await this.confirm(`${summary} ${this.s('Shall I proceed{sir}?')}`))) {
       this.stop('declined');
       this.check();
     }
 
-    // 3. Do it.
+    // 4. Do it.
     this.executing = true;
     let lastStep = -1;
     for (let i = 0; i < this.actions.length; i++) {
       this.check();
+      if (!doing(i)) continue;
       this.index = i;
       const a = this.actions[i];
       const p = plan.actions[i];
       if (a.stepIndex !== lastStep) {
         lastStep = a.stepIndex;
-        this.emit({ type: 'step', say: plan.step_lines[a.stepIndex] || this.skill.map.steps[a.stepIndex].title, stepNo: a.stepIndex + 1, totalSteps: this.total });
+        this.emit({ type: 'step', say: plan.step_lines[a.stepIndex] || this.skill.map.steps[a.stepIndex].title, stepNo: progress(this.skill.map, a.stepIndex, { skipped: this.skipped, chosen: this.chosen }).n, totalSteps: this.total });
       }
       await this.checkpoint(a, p, i);
       await this.perform(a, p, i);

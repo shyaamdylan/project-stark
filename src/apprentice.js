@@ -100,6 +100,7 @@ Rules:
 - reason must use the expert's own words (quote them), from an answer (name it in reason_qa_id) or from something they said while working (name that event in reason_event_id). Never invent a reason; use null if you don't know.
 - rule is the decision as a general, checkable condition (e.g. "Equipment over €5,000 is coded to capex 0400"), or null.
 - guardrails are limits, exceptions, and moments to stop and ask someone. Only include ones the expert stated or clearly showed, linked to the answer (qa_id) when there is one.
+- only_if: when the task forks (a choice where one option adds steps the other doesn't need, like making an extra version or a second export), set it on each step that only belongs to that option: the option in a few words that read after "if you want" (e.g. "a simplified version"), worded the same on every step of that option. Steps everyone does: null. The expert may have shown an option or only mentioned it; either way it's a fork.
 - open_questions: the most important things still unclear (exceptions you noticed, rules you're unsure of, cases you haven't seen), at most 3, each a short spoken question.
 - teach_back: explain the whole process back in your own words, as you'd say it aloud, in under 120 words, starting with "Here's how I understand it". Mention the judgment calls and guardrails.`;
 
@@ -115,6 +116,7 @@ const STEP_SCHEMA = {
     reason_qa_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     reason_event_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
     rule: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    only_if: { anyOf: [{ type: 'string' }, { type: 'null' }] },
     guardrails: {
       type: 'array',
       items: {
@@ -129,7 +131,7 @@ const STEP_SCHEMA = {
       },
     },
   },
-  required: ['title', 'action', 'event_ids', 'is_judgment', 'decision', 'reason', 'reason_qa_id', 'reason_event_id', 'rule', 'guardrails'],
+  required: ['title', 'action', 'event_ids', 'is_judgment', 'decision', 'reason', 'reason_qa_id', 'reason_event_id', 'rule', 'only_if', 'guardrails'],
   additionalProperties: false,
 };
 
@@ -149,7 +151,7 @@ const MAP_SCHEMA = {
 // ---------- tidying up: from "what this expert did" to "what anyone should do" ----------
 
 // Bump when the cleanup rules change, so older skills are tidied again.
-const REFINE_VERSION = 1;
+const REFINE_VERSION = 2;
 
 const REFINE_SYSTEM = `You're tidying up a Work Map that was just written from an expert's screen recording, so anyone can follow it from wherever they happen to be.
 
@@ -159,7 +161,8 @@ const REFINE_SYSTEM = `You're tidying up a Work Map that was just written from a
 4. Keep everything that belongs to the task exactly as it is: the expert's reasons and quotes, rules, guardrails, reason_qa_id, reason_event_id, judgment flags. Keep event_ids for what you keep; drop ids that only belonged to removed, incidental actions.
 5. Never invent reasons, rules or guardrails. They only ever come from the expert.
 6. summary: rewrite only if it mentions incidental things. open_questions: keep as they are. teach_back: update it only if the steps changed, in the same voice, starting "Here's how I understand it".
-7. cleanup_notes: what you changed, in plain words for the expert, at most 5 (e.g. "Dropped starting on Facebook: you can open Canva from anywhere."). Empty if nothing needed changing.`;
+7. Forks: a step that only belongs to one option of a choice (an extra version, a second format, a mode the expert said is optional) gets only_if, the option in a few words that read after "if you want", worded the same on every step of that option; steps everyone does get null. Keep only_if as it is where it's already set. Never make a step everyone needs optional.
+8. cleanup_notes: what you changed, in plain words for the expert, at most 5 (e.g. "Dropped starting on Facebook: you can open Canva from anywhere."). Empty if nothing needed changing.`;
 
 const REFINED_STEP_SCHEMA = {
   ...STEP_SCHEMA,
@@ -221,6 +224,7 @@ function normalizeRefined(original, refined, events) {
       kind: dest && dest.name ? 'go' : 'do',
       destination: dest && dest.name ? dest : null,
       inferred: Boolean(s.inferred),
+      only_if: typeof s.only_if === 'string' && s.only_if.trim() ? s.only_if.trim() : null,
       event_ids: (s.event_ids || []).filter((id) => ids.has(id)),
       guardrails: Array.isArray(s.guardrails) ? s.guardrails : [],
     };

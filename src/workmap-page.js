@@ -192,6 +192,7 @@ M.steps.forEach((s, i) => {
   if (m) meta.append(el('span', '', clock(m.t)));
   if (s.kind === 'go') meta.append(el('span', 'tag go', 'Get to'));
   if (s.inferred) meta.append(el('span', 'tag added', 'Added to fill a gap'));
+  if (s.only_if) meta.append(el('span', 'tag added', 'Only if you want ' + s.only_if));
   if (s.is_judgment) meta.append(el('span', 'tag j', 'Judgment'));
   if (s.guardrails.length) meta.append(el('span', 'tag g', s.guardrails.length + (s.guardrails.length > 1 ? ' guardrails' : ' guardrail')));
   txt.append(meta);

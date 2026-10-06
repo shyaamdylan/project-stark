@@ -120,6 +120,7 @@ function describeSkill({ map, session }) {
   const events = new Map((session.events || []).map((e) => [e.id, e]));
   const steps = map.steps.map((s, i) => {
     const lines = [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`];
+    if (s.only_if) lines.push(`  Only if they want ${s.only_if} (one option at a fork; leave it out otherwise)`);
     if (s.kind === 'go') lines.push(`  Get to: ${destinationText(s.destination)} (from anywhere; skip if already there)`);
     if (s.decision) lines.push(`  Decision: ${s.decision}`);
     if (s.reason) lines.push(`  Expert's reason: "${s.reason}"`);
@@ -174,7 +175,7 @@ async function planReplay(apiKey, skill) {
   const steps = skill.map.steps.map((s, i) => {
     const did = s.event_ids.map((id) => events.get(id)).filter((e) => e && e.type !== 'screen').map((e) => `    ${describeEvent(e).replace(/^(e\d+) \d\d:\d\d /, '$1 ')}`);
     const go = s.kind === 'go' ? `  Get to: ${destinationText(s.destination)}` : '';
-    return [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`, go, s.inferred ? '  (Added to fill a gap; not in the recording.)' : '', s.is_judgment && s.reason ? `  Expert's reason: "${s.reason}"` : '', ...s.guardrails.map((g) => `  Guardrail: ${g.text}`), did.length ? '  What the expert did:' : '', ...did]
+    return [`Step ${i + 1}: ${s.title}`, `  Do: ${s.action}`, s.only_if ? `  Only if they want ${s.only_if} (one option at a fork)` : '', go, s.inferred ? '  (Added to fill a gap; not in the recording.)' : '', s.is_judgment && s.reason ? `  Expert's reason: "${s.reason}"` : '', ...s.guardrails.map((g) => `  Guardrail: ${g.text}`), did.length ? '  What the expert did:' : '', ...did]
       .filter(Boolean)
       .join('\n');
   });

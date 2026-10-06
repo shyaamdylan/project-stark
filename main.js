@@ -53,6 +53,7 @@ const act = require('./src/act');
 const textMode = require('./src/textmode');
 const runProject = require('./src/runproject');
 const { Apprentice, cleanUrl, REFINE_VERSION } = require('./src/apprentice');
+const { decideForks } = require('./src/forks');
 const { TeachSession } = require('./src/teach');
 const { renderWorkMap } = require('./src/workmap-page');
 const { transcribe } = require('./src/stt');
@@ -900,8 +901,8 @@ function stepPayload(step) {
     chat: Boolean(step.chat), // the tutor talking (an answer, a check-in): the cursor stays put
     flagged: Boolean(step.flagged), // a decision she stopped: the field gets the warning highlight
     retract: Boolean(step.retract), // what she pointed at is gone (they left, or scrolled it away): pointer home
-    stepNo: step.stepNumber || 0,
-    totalSteps: step.totalSteps || 0,
+    stepNo: step.shownStep || step.stepNumber || 0, // on the path they're taking, past forks they didn't
+    totalSteps: step.shownTotal || step.totalSteps || 0,
     label: step.target ? step.target.label : null,
     rect: step.target ? toLocal(step.target) : null,
   };
@@ -975,7 +976,7 @@ async function confirmReply(rawText) {
       return { ok: false, reason: 'not-learned', say: pending.agent === 'jarvis' ? persona('jarvis', cfg).s("Then I'm afraid I haven't been taught that one{sir}.") : "Sorry, I can't do that one yet." };
     }
     if (/^(yes|yeah|yep|yup|sure|correct|right|exactly|that'?s (it|right)|it is|i do|please|ok(ay)?)\b/.test(t)) {
-      return pending.agent === 'jarvis' ? beginJarvis(pending.id) : beginSkill(pending.id, pending.text, { spot: pending.spot });
+      return pending.agent === 'jarvis' ? beginJarvis(pending.id, pending.text) : beginSkill(pending.id, pending.text, { spot: pending.spot });
     }
     return again();
   } catch (err) {
@@ -988,6 +989,8 @@ async function beginSkill(id, text, { spot = false } = {}) {
   let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: "I haven't learned that yet." };
   skill = await ensureRefined(id, skill);
+  // Whether what they asked for already picks an option at a fork ("…the simple version").
+  const forks = decideForks({ apiKey: cfg.anthropicApiKey, map: skill.map, request: text });
 
   let plan = null;
   try {
@@ -1015,6 +1018,9 @@ async function beginSkill(id, text, { spot = false } = {}) {
     thinking: () => win.webContents.send('guide-thinking'),
   });
   replay = r;
+  const settled = await forks;
+  r.replay.decide(settled);
+  if (settled.size) console.log(`[${spot ? 'spotter' : 'lesson'}] options: ${[...settled].map(([o, d]) => `"${o}" ${d}`).join(', ')}`);
   startInputHook();
 
   // Say every line once in the background so the voice is instant when needed
@@ -1385,7 +1391,7 @@ async function askJarvis(raw) {
     }
     // A clear match runs the learned skill. A "maybe" isn't worth a question:
     // he does what was actually asked, with that skill as an expert's reference.
-    if (found && found.id && found.match !== 'maybe') return beginJarvis(found.id);
+    if (found && found.id && found.match !== 'maybe') return beginJarvis(found.id, text);
     if (found && found.id && found.match === 'maybe') relatedSkill = loadSkill(found.id);
   }
 
@@ -1618,11 +1624,13 @@ async function jarvisPlan(id, skill, actions) {
   return plan;
 }
 
-async function beginJarvis(id) {
+// request: what they asked for, which may already pick an option at a fork.
+async function beginJarvis(id, request = '') {
   const p = persona('jarvis', cfg);
   let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: p.s("I'm afraid I haven't been taught that one{sir}.") };
   skill = await ensureRefined(id, skill);
+  const forks = decideForks({ apiKey: cfg.anthropicApiKey, map: skill.map, request });
 
   let recorded = null;
   try {
@@ -1642,7 +1650,9 @@ async function beginJarvis(id) {
   }
   if (!plan.can_run) return { ok: false, reason: 'declined', say: plan.why_not || p.s("I'm afraid that one needs a human touch{sir}.") };
 
-  const run = new JarvisRun({ skill, actions, plan, s: p.s, scan: scanFrontWindow, act: hands, ask: askUser, emit: jarvisEmitter(() => run) });
+  const settled = await forks;
+  if (settled.size) console.log(`[jarvis] options: ${[...settled].map(([o, d]) => `"${o}" ${d}`).join(', ')}`);
+  const run = new JarvisRun({ skill, actions, plan, forks: settled, s: p.s, scan: scanFrontWindow, act: hands, ask: askUser, emit: jarvisEmitter(() => run) });
   console.log(`[jarvis] starting "${skill.map.title}" (${actions.length} actions)`);
   return launchJarvis(run, { title: skill.map.title, id });
 }
