@@ -36,6 +36,11 @@ At a judgment call or a step with guardrails, what the learner fills in is check
 (`Tutor.judge`) against the expert's decision, reason and guardrails for the case on their
 screen before the lesson moves on; a wrong one is stopped and explained in the expert's words.
 
+Spotter (`spot: true` on the Lesson; "spot me on…" or the hub's Spot me) is the same lesson
+run quietly: steps move on silently, no pointing or check-ins, and only a wrong decision or a
+guardrail that applies to the record on screen (`Tutor.concern`, asked as that step comes up)
+is said.
+
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
 

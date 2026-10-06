@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('hub', {
   list: () => ipcRenderer.invoke('hub-list'),
   skill: (id) => ipcRenderer.invoke('hub-skill', id),
   learn: (id) => ipcRenderer.send('hub-learn', id),
+  spot: (id) => ipcRenderer.send('hub-spot', id),
   exportForAgents: (id) => ipcRenderer.invoke('hub-export', id),
   remove: (id) => ipcRenderer.invoke('hub-delete', id),
   reveal: (id) => ipcRenderer.send('hub-reveal', id),

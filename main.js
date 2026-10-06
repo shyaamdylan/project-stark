@@ -507,6 +507,12 @@ async function ask(text) {
 
   stopGuide();
   const canGuide = Guide.available(cfg);
+  // "Spot me on coding an invoice", "keep an eye on me while I…": Spotter mode.
+  const spotted = canGuide && SPOT_ME.exec(text);
+  if (spotted) {
+    const rest = text.replace(SPOT_ME, ' ').replace(/^\s*(?:on|with|while i(?:'m)?|as i|doing)\s+/i, '').trim();
+    return startGuide(rest || text, scan, { ok: false, reason: 'not-learned', say: "I can only spot you on something I've been taught. Teach me it first and I'll keep an eye on you next time." }, scan, { spot: true });
+  }
   // Carrying on with what she just did here ("now the left hand" after pointing
   // at the nose in a diagram): do the same kind of thing, before anything else.
   const follow = canGuide ? convo.followUp(text, lastScreenKey) : null;
@@ -901,9 +907,13 @@ function stepPayload(step) {
   };
 }
 
+// Spotter: watching over their shoulder while they do a taught skill.
+const SPOT_ME = /\b(?:spot me|spotter|keep an eye on me|watch over me|look over my shoulder|check my work|supervise me|watch me work)\b/i;
+
 // Walkthroughs only ever follow a skill it has been taught. If none matches,
 // say so (or fall back to `otherwise`) rather than improvising a procedure.
-async function startGuide(text, scan, otherwise = null, screen = scan) {
+// opts.spot: Spotter mode (watch quietly, flag only what matters).
+async function startGuide(text, scan, otherwise = null, screen = scan, opts = {}) {
   const notLearned = otherwise || {
     ok: false,
     reason: 'not-learned',
@@ -919,10 +929,10 @@ async function startGuide(text, scan, otherwise = null, screen = scan) {
   if (!found || !found.id) return notLearned;
   if (found.match === 'maybe') {
     // Close, but not certain: check before walking them through the wrong thing.
-    pendingClarify = { id: found.id, text, at: Date.now(), agent: 'friday' };
+    pendingClarify = { id: found.id, text, at: Date.now(), agent: 'friday', spot: Boolean(opts.spot) };
     return { ok: true, clarify: true, question: found.question };
   }
-  return beginSkill(found.id, text);
+  return beginSkill(found.id, text, opts);
 }
 
 // Which learned skill (if any) a request is for. Only asks Claude when the
@@ -965,7 +975,7 @@ async function confirmReply(rawText) {
       return { ok: false, reason: 'not-learned', say: pending.agent === 'jarvis' ? persona('jarvis', cfg).s("Then I'm afraid I haven't been taught that one{sir}.") : "Sorry, I can't do that one yet." };
     }
     if (/^(yes|yeah|yep|yup|sure|correct|right|exactly|that'?s (it|right)|it is|i do|please|ok(ay)?)\b/.test(t)) {
-      return pending.agent === 'jarvis' ? beginJarvis(pending.id) : beginSkill(pending.id, pending.text);
+      return pending.agent === 'jarvis' ? beginJarvis(pending.id) : beginSkill(pending.id, pending.text, { spot: pending.spot });
     }
     return again();
   } catch (err) {
@@ -974,7 +984,7 @@ async function confirmReply(rawText) {
   }
 }
 
-async function beginSkill(id, text) {
+async function beginSkill(id, text, { spot = false } = {}) {
   let skill = loadSkill(id);
   if (!skill) return { ok: false, reason: 'not-learned', say: "I haven't learned that yet." };
   skill = await ensureRefined(id, skill);
@@ -995,9 +1005,10 @@ async function beginSkill(id, text) {
     scan: scanFrontWindow,
     tutor: new Tutor(cfg.anthropicApiKey, skill),
     snap,
+    spot,
     emit: (step) => {
       if (replay !== r) return;
-      console.log(`[lesson] step ${step.stepNumber || '-'}/${step.totalSteps}${step.chat ? ' (tutor)' : ''}:`, step.status, step.target ? step.target.label : '', step.say ? `- ${step.say}` : '');
+      console.log(`[${spot ? 'spotter' : 'lesson'}] step ${step.stepNumber || '-'}/${step.totalSteps}${step.chat ? ' (tutor)' : ''}:`, step.status, step.target ? step.target.label : '', step.say ? `- ${step.say}` : '');
       win.webContents.send('guide-step', stepPayload(step));
       if (step.status !== 'step') stopGuide();
     },
@@ -1006,15 +1017,16 @@ async function beginSkill(id, text) {
   replay = r;
   startInputHook();
 
-  // Say every line once in the background so the voice is instant when needed.
-  if (cfg.elevenLabs.apiKey && cfg.voiceEnabled) {
+  // Say every line once in the background so the voice is instant when needed
+  // (not when spotting: it doesn't say the steps).
+  if (!spot && cfg.elevenLabs.apiKey && cfg.voiceEnabled) {
     (async () => {
       for (const line of r.lines()) await voice.synthesize(line, cfg, 'happy').catch(() => {});
     })();
   }
   // Let the renderer switch into guide mode before the first step arrives.
   setTimeout(() => r.start(), 150);
-  return { ok: true, guide: true, status: 'starting', say: '', title: skill.map.title };
+  return { ok: true, guide: true, spot, status: 'starting', say: '', title: skill.map.title };
 }
 
 function stopGuide() {
@@ -1986,6 +1998,17 @@ ipcMain.handle('hub-skill', (_e, id) => {
     events: (sess.events || []).map((e) => ({ id: e.id, t: e.t, type: e.type, label: e.label, text: e.text, from: e.from, to: e.to, role: e.role, keys: e.keys, app: e.app, window: e.window, rect: e.rect, frame: e.frame ? { url: frameUrl(e.frame), display: e.frame.display } : null })),
     qas: sess.qas || [],
   };
+});
+// "Spot me": she watches while you do it, and only speaks up when something's off.
+ipcMain.on('hub-spot', async (_e, id) => {
+  if (teach) return;
+  setAgent('friday');
+  if (hub && !hub.isDestroyed()) hub.minimize();
+  await refocusFrontApp();
+  stopGuide();
+  stopJarvis('new-request');
+  const res = await beginSkill(path.basename(String(id)), '', { spot: true });
+  if (win) win.webContents.send('show-result', res);
 });
 // "Teach me": Friday walks you through it on your own screen.
 ipcMain.on('hub-learn', async (_e, id) => {

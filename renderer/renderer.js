@@ -807,11 +807,14 @@ async function runAsk(text, request = () => window.buddy.ask(text, state.agent))
   if (res.guide) {
     // Steps arrive on their own as the user works (see 'guide-step').
     state.guiding = true;
-    guideCount.textContent = 'Starting…';
+    state.spotting = Boolean(res.spot);
+    guideCount.textContent = res.spot ? 'Spotting' : 'Starting…';
+    // Spotting: no Done button (she follows along by herself); Stop stays.
+    nextBtn.classList.toggle('hidden', Boolean(res.spot));
     guideBar.classList.remove('hidden');
     guideAskForm.classList.remove('hidden');
     setTimeout(updateMic, 0); // a lesson is a conversation: the mic is open
-    sayEl.textContent = res.title ? `Let's do it: ${res.title}` : '';
+    sayEl.textContent = res.spot ? `Spotting: ${res.title}. Go ahead, I'll speak up if anything needs a second look.` : res.title ? `Let's do it: ${res.title}` : '';
     showBubble();
     return;
   }
@@ -866,7 +869,7 @@ async function showGuideStep(step) {
     return;
   }
   if (step.status === 'step') {
-    guideCount.textContent = step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`;
+    guideCount.textContent = `${state.spotting ? 'Spotting · ' : ''}${step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`}`;
     guideBar.classList.remove('hidden');
     // Speak while the cursor flies, so the two arrive together.
     if (step.say) {
@@ -882,6 +885,8 @@ async function showGuideStep(step) {
 
   // Finished, or can't go on.
   state.guiding = false;
+  state.spotting = false;
+  nextBtn.classList.remove('hidden');
   guideBar.classList.add('hidden');
   guideAskForm.classList.add('hidden');
   guideNote.classList.add('hidden');
@@ -894,6 +899,8 @@ async function showGuideStep(step) {
 function stopGuide() {
   if (!state.guiding) return;
   state.guiding = false;
+  state.spotting = false;
+  nextBtn.classList.remove('hidden');
   window.buddy.guideStop();
   stopSpeaking();
   guideBar.classList.add('hidden');

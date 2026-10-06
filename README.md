@@ -136,6 +136,11 @@ sitting next to you rather than a click-through tutorial:
 - **She notices you've moved on.** Clicking what a later step needs, or moving into a later step's
   field, moves the lesson there at once. **Done ✓** (or just saying "done") marks a step done; a
   decision is checked first. If you go quiet she checks in after about 12 seconds.
+- **Or let her spot you.** "Hey Friday, spot me on coding an invoice" (or **Spot me** in the Skills
+  hub): you do the task yourself and she watches over your shoulder without a word, following
+  along. She only speaks up when something needs a second look: a decision the expert wouldn't
+  make, or a guardrail that applies to the record in front of you (said as you reach that step,
+  before you act). At the end: "All done, nothing to flag", or how many things she caught.
 - **On track, she keeps up instantly.** Do the step and she's onto the next one, no waiting.
 - **Off track, she helps.** "That opened Preferences. Close it, then click Export." Got there
   another way? She accepts it and carries on.

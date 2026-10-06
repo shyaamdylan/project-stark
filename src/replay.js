@@ -181,6 +181,10 @@ class Replay {
     //   shows the same thing (the same record); otherwise judge() decides.
     this.expect = null;
     this.expectation = null; // { index, view, promise, result }
+    //   concern(action, scan) -> { flag, say, target }: as a step with
+    //   guardrails (that isn't a decision to fill in) comes up, whether the
+    //   record on screen triggers one; if so it's said before they act.
+    this.concern = null;
   }
 
   // Steps where what's entered is a decision, not just a click: the expert's
@@ -199,6 +203,25 @@ class Replay {
       .then((r) => (exp.result = r || { expected: [] }))
       .catch(() => (exp.result = { expected: [] }));
     this.expectation = exp;
+  }
+
+  // A step with guardrails (not a decision to fill in, which judge() checks):
+  // ask once, in the background, whether this record triggers one, and say
+  // so before they act. Only on the step's first action, only once.
+  checkConcern(a) {
+    if (!this.concern || !this.latest || !a.first || a.kind === 'edit') return;
+    const step = this.skill.map.steps[a.stepIndex];
+    if (!step || !(step.guardrails || []).length) return;
+    this.concerned = this.concerned || new Set();
+    if (this.concerned.has(a.stepIndex)) return;
+    this.concerned.add(a.stepIndex);
+    const at = this.index;
+    Promise.resolve(this.concern(a, this.latest))
+      .then((r) => {
+        if (!r || !r.flag || !this.running || this.index !== at) return;
+        this.emit({ status: 'step', say: r.say, note: '', target: r.target || this.target, stepNumber: a.stepIndex + 1, totalSteps: this.total, chat: true, flagged: true });
+      })
+      .catch(() => {});
   }
 
   // The verdict from the expectation, if it applies and is ready within a
@@ -309,6 +332,7 @@ class Replay {
     this.lostSince = this.target || !a.label || a.kind === 'any-click' ? 0 : Date.now();
     this.aheadAtStart = new Set(this.upcoming().filter((i) => this.latest && locate(this.actions[i], this.latest.elements)));
     this.prepareExpectation(a);
+    this.checkConcern(a);
     // What later fields hold now, so typing in one counts as having moved on.
     this.aheadValues = new Map(
       this.upcoming()

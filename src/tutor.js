@@ -104,6 +104,26 @@ const EXPECT_SCHEMA = {
   additionalProperties: false,
 };
 
+// A step with guardrails is coming up (sending, approving, booking): does
+// anything about the record on screen mean the expert would stop here? Asked
+// as the step comes up, so a warning comes before they act, not after.
+const CONCERN_SYSTEM = `You are Friday, keeping an eye on someone doing a task an expert showed you. They're about to do a step that has guardrails. Look at the case in front of them now (screenshot and accessibility list) and decide whether any guardrail applies to it, or the expert's reasoning says to stop or check something first.
+
+- flag true only when something on screen clearly triggers a guardrail (an amount over a limit, a supplier or name that needs checking, a missing number the expert said is required, an exception that applies). When in doubt, false: a false alarm is worse than none.
+- say (if flag): two short spoken sentences: what to check or why to stop, in the expert's own reasoning, applied to what's on screen. "" if not flagged.
+- target_id: the thing on screen it's about, from the list, or null.`;
+
+const CONCERN_SCHEMA = {
+  type: 'object',
+  properties: {
+    flag: { type: 'boolean' },
+    say: { type: 'string' },
+    target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+  },
+  required: ['flag', 'say', 'target_id'],
+  additionalProperties: false,
+};
+
 const TRIGGERS = {
   said: (d) => `They said: "${d}"`,
   'off-path': (d) => `They did something other than the current instruction (${d}).`,
@@ -134,6 +154,32 @@ class Tutor {
       `Where they are: ${ctx.where || 'unknown'}`,
       `On screen now:\n${screen.text || '(nothing readable)'}`,
     ].filter(Boolean);
+  }
+
+  // As a step with guardrails comes up: does the record on screen trigger one?
+  // ctx: { stepNumber, scan, image, where }. Returns { flag, say, target }.
+  async concern(ctx) {
+    const step = this.skill.map.steps[ctx.stepNumber - 1];
+    if (!step || !(step.guardrails || []).length) return { flag: false, say: '', target: null };
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || [], { withPicture: Boolean(ctx.image) });
+    const text = this.stepFacts(step, ctx, screen).join('\n');
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 1200,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: CONCERN_SCHEMA } },
+      system: [{ type: 'text', text: CONCERN_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: ctx.image ? [imageBlock(ctx.image), { type: 'text', text: `${screenshotNote(ctx.image)}\n${text}` }] : text }],
+    });
+    try {
+      const r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      const flag = Boolean(r.flag) && Boolean(String(r.say || '').trim());
+      if (flag) this.notes.push(`At step ${ctx.stepNumber} you flagged: "${r.say}"`);
+      return { flag, say: flag ? r.say : '', target: flag && Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null };
+    } catch {
+      return { flag: false, say: '', target: null };
+    }
   }
 
   // Before they fill in a decision: what belongs there for the case on screen,
@@ -274,7 +320,12 @@ class Lesson {
   //   idleMs             quiet time after an instruction before checking in
   //   offPathDelayMs     how long to let a stray click play out before commenting
   //   snap(scan)         a screenshot of the front window for a tutor turn, or null
-  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 12000, offPathDelayMs = 900, now = () => Date.now() }) {
+  //   spot               Spotter mode: watch quietly while they work, and only
+  //                      speak up for a wrong decision or a guardrail (no step
+  //                      instructions, no pointing, no check-ins)
+  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 12000, offPathDelayMs = 900, now = () => Date.now(), spot = false }) {
+    this.spot = spot;
+    this.flags = 0; // things flagged (wrong decisions, guardrails), for the wrap-up
     this.snap = snap;
     this.skill = skill;
     this.emitOut = emit;
@@ -303,14 +354,29 @@ class Lesson {
       emit: (step) => this.fromReplay(step),
       thinking,
     });
-    this.replay.onOffPath = (why) => this.schedule('off-path', why, this.offPathDelayMs);
+    // Spotting, a different route or a detour is their business: no comments, no
+    // "where are you?" (and no Claude calls for it).
+    this.replay.onOffPath = (why) => !spot && this.schedule('off-path', why, this.offPathDelayMs);
+    if (tutor && typeof tutor.concern === 'function') this.replay.concern = (a, s) => this.concernStep(a, s);
     if (tutor && typeof tutor.judge === 'function') this.replay.judge = (a, field, s) => this.judgeStep(a, field, s);
     if (tutor && typeof tutor.expect === 'function') this.replay.expect = (a, s) => this.expectStep(a, s);
-    this.replay.onLost = (why) => this.schedule('lost', why, 0);
+    this.replay.onLost = (why) => !spot && this.schedule('lost', why, 0);
   }
 
   get total() {
     return this.replay.total;
+  }
+
+  // As a step with guardrails comes up: anything to stop for on this record?
+  async concernStep(a, s) {
+    const image = await this.snap(s).catch(() => null);
+    const r = await this.tutor.concern({ stepNumber: a.stepIndex + 1, scan: s, image, where: this.observer.where() });
+    console.log(`[lesson] step ${a.stepIndex + 1} guardrails: ${r.flag ? `flagged - ${r.say}` : 'nothing applies'}`);
+    if (r.flag) {
+      this.lastSpokeAt = this.now();
+      this.nudges = 0;
+    }
+    return r;
   }
 
   // As a decision step comes up: work out what belongs in it, in the background.
@@ -403,6 +469,8 @@ class Lesson {
 
   fromReplay(step) {
     if (!this.running) return;
+    if (step.flagged) this.flags++;
+    if (this.spot) step = this.spotted(step);
     if (step.status === 'step' && step.say) {
       this.lastSpokeAt = this.now();
       this.nudges = 0;
@@ -422,7 +490,18 @@ class Lesson {
     }, delay);
   }
 
+  // Spotting: steps move on silently (just the counter); only flags speak; the
+  // wrap-up says whether anything came up.
+  spotted(step) {
+    if (step.status === 'done') {
+      return { ...step, say: this.flags ? `All done. I flagged ${this.flags === 1 ? 'one thing' : `${this.flags} things`} along the way.` : 'All done, nothing to flag.' };
+    }
+    if (step.status !== 'step' || step.flagged || step.chat) return step;
+    return { ...step, say: '', note: '', target: null, quietMove: true, spotting: true };
+  }
+
   checkIdle() {
+    if (this.spot) return; // spotting never nags
     if (!this.running || this.busy) return;
     const quietSince = Math.max(this.lastSpokeAt, this.observer.lastInputAt, this.replay.progressAt || 0);
     const wait = this.idleMs * (this.nudges + 1);

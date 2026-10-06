@@ -41,7 +41,7 @@ function select(id) {
   $('status').textContent = state(current);
   $('status').className = 'status' + (current.page && current.confirmed ? ' confirmed' : '');
   $('meta').textContent = [current.page ? `${current.steps} steps` : null, current.judgments ? `${current.judgments} decision ${current.judgments === 1 ? 'point' : 'points'}` : null, `Recorded ${date(current.createdAt)}`].filter(Boolean).join(' · ');
-  $('learn').disabled = !current.page; $('export').disabled = !current.page; $('open').disabled = !current.page; $('run').disabled = !current.page;
+  $('learn').disabled = !current.page; $('spot').disabled = !current.page; $('export').disabled = !current.page; $('open').disabled = !current.page; $('run').disabled = !current.page;
   $('unfinished').classList.toggle('hidden', Boolean(current.page));
   $('frame').classList.toggle('hidden', !current.page);
   if (previous !== current.id || $('frame').getAttribute('src') !== current.page) $('frame').src = current.page || 'about:blank';
@@ -75,6 +75,7 @@ $('empty-teach').addEventListener('click', () => window.hub.teach());
 $('retry').addEventListener('click', () => load());
 $('open').addEventListener('click', () => { if (current) window.hub.openExternal(current.id); document.querySelector('.more').open = false; });
 $('learn').addEventListener('click', () => current?.page && window.hub.learn(current.id));
+$('spot').addEventListener('click', () => current?.page && window.hub.spot(current.id));
 $('export').addEventListener('click', async () => {
   if (!current?.page) return;
   try { await window.hub.exportForAgents(current.id); document.querySelector('.more').open = false; }

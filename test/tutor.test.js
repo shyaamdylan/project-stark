@@ -170,3 +170,34 @@ test("Friday checks a filled-in decision against the expert's reasoning, and rem
   for (const fact of ['Equipment over the limit is always capex.', 'The learner entered "4711"', 'The expert entered "0400"', 'Unknown supplier: ask the controller.']) assert.ok(prompt.includes(fact), fact);
   assert.equal(t.notes.length, 1, 'the next tutor turn hears about it');
 });
+
+test('Spotter: steps move on silently, a wrong click gets no comment, and a guardrail on this record is said before they act', async () => {
+  const guarded = { ...skill, map: { ...skill.map, steps: skill.map.steps.map((st, i) => (i === 3 ? { ...st, guardrails: [{ kind: 'stop_and_ask', text: 'Unknown supplier: ask the controller first.', qa_id: null }] } : st)) } };
+  const emitted = [];
+  const seen = [];
+  const concerns = [];
+  const tutor = {
+    turn: async (ctx) => (seen.push(ctx), { say: 'x', target: null, stepNumber: null, then: 'wait', skipSteps: [], status: 'continue' }),
+    concern: async (ctx) => (concerns.push(ctx.stepNumber), { flag: true, say: "Before you save: this supplier isn't on the list. The expert would ask the controller first.", target: null }),
+  };
+  const lesson = new Lesson({ skill: guarded, scan: async () => ({ app: 'Acme', window: 'Report', elements: [exportBtn, prefs, save] }), emit: (s) => emitted.push(s), tutor, offPathDelayMs: 10, idleMs: 20, spot: true });
+  lesson.replay.loop = async () => {};
+  await lesson.start();
+  assert.equal(emitted[0].say, '', 'no step instructions');
+  assert.equal(emitted[0].target, null, 'no pointing');
+  lesson.onMouseDown(210, 15); // a detour: Preferences
+  await tick(120);
+  assert.equal(seen.length, 0, 'no comments, no check-ins');
+  // Through the steps to the one with a guardrail.
+  lesson.replay.index = 3;
+  lesson.replay.point();
+  await tick(30);
+  assert.deepEqual(concerns, [4]);
+  const flag = emitted.find((e) => e.flagged);
+  assert.match(flag.say, /ask the controller/);
+  lesson.onMouseDown(310, 15); // Save
+  await tick(200);
+  lesson.stop();
+  assert.equal(emitted.at(-1).status, 'done');
+  assert.equal(emitted.at(-1).say, 'All done. I flagged one thing along the way.');
+});
