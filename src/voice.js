@@ -6,8 +6,58 @@
 // milliseconds instead of after the whole clip is made. Lines that repeat (or
 // were prepared ahead, like walkthrough steps) are cached and play instantly.
 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
 const cache = new Map(); // `${voice}|${model}|${mood}|${text}` -> Buffer
 const CACHE_LIMIT = 120;
+
+// Short lines that come up again and again (the greeting, "Yes?", fillers,
+// acknowledgements) are also kept on disk, so they're paid for once per voice
+// rather than on every launch. Long one-off answers stay in memory only.
+const DISK_MAX_CHARS = 90;
+const DISK_LIMIT = 400;
+let diskDir = null;
+function setDiskCache(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    diskDir = dir;
+  } catch {
+    diskDir = null;
+  }
+}
+const diskFile = (key) => path.join(diskDir, `${crypto.createHash('sha1').update(key).digest('hex')}.mp3`);
+const reusable = (key) => key.split('|').slice(3).join('|').length <= DISK_MAX_CHARS;
+
+function fromDisk(key) {
+  if (!diskDir || !reusable(key)) return null;
+  try {
+    const buf = fs.readFileSync(diskFile(key));
+    cache.set(key, buf);
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function toDisk(key, buf) {
+  if (!diskDir || !reusable(key) || !buf.length) return;
+  try {
+    fs.writeFileSync(diskFile(key), buf);
+    const files = fs.readdirSync(diskDir).filter((f) => f.endsWith('.mp3'));
+    if (files.length > DISK_LIMIT) {
+      // Drop the ones least recently made.
+      files
+        .map((f) => ({ f, t: fs.statSync(path.join(diskDir, f)).mtimeMs }))
+        .sort((a, b) => a.t - b.t)
+        .slice(0, files.length - DISK_LIMIT)
+        .forEach(({ f }) => fs.unlinkSync(path.join(diskDir, f)));
+    }
+  } catch {}
+}
+
+const cached = (key) => cache.get(key) || fromDisk(key);
 
 const fallbackVoices = new Map(); // configured voice id -> one that is on this account
 
@@ -49,6 +99,7 @@ function cacheKey(text, cfg, mood, agent) {
 function remember(key, buf) {
   if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value);
   cache.set(key, buf);
+  toDisk(key, buf);
 }
 
 // Start an ElevenLabs stream. Retries once with a fallback voice if needed.
@@ -86,7 +137,8 @@ const AUDIO_HEADERS = { 'Content-Type': 'audio/mpeg', 'Access-Control-Allow-Orig
 // new ones are played as they arrive and saved for next time.
 async function stream(text, cfg, mood, agent = 'friday') {
   const key = cacheKey(text, cfg, mood, agent);
-  if (cache.has(key)) return new Response(cache.get(key), { headers: AUDIO_HEADERS });
+  const hit = cached(key);
+  if (hit) return new Response(hit, { headers: AUDIO_HEADERS });
   const res = await request(text, cfg, mood, agent);
   const [play, keep] = res.body.tee();
   new Response(keep)
@@ -100,11 +152,12 @@ async function stream(text, cfg, mood, agent = 'friday') {
 async function synthesize(text, cfg, mood = 'happy', agent = 'friday') {
   if (!cfg.voiceEnabled || !cfg.elevenLabs.apiKey) return null;
   const key = cacheKey(text, cfg, mood, agent);
-  if (cache.has(key)) return cache.get(key);
+  const hit = cached(key);
+  if (hit) return hit;
   const res = await request(text, cfg, mood, agent);
   const buf = Buffer.from(await res.arrayBuffer());
   remember(key, buf);
   return buf;
 }
 
-module.exports = { synthesize, stream };
+module.exports = { synthesize, stream, setDiskCache };

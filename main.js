@@ -63,6 +63,9 @@ const { findNotches, overlayLayout } = require('./src/notch');
 const { checkOtherAudio } = require('./src/macaudio');
 const { makeStationary } = require('./src/stationary');
 const { avoid } = require('./src/avoid');
+const usage = require('./src/usage');
+// Every Claude call logs its tokens and cost (src/usage.js).
+usage.install();
 const { follow, moved } = require('./src/track');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
@@ -2044,6 +2047,8 @@ ipcMain.on('open-hub', () => openHub());
 // renderer gets the same lists (src/persona.js) with the config.
 function prewarmVoice() {
   if (!cfg.elevenLabs.apiKey || !cfg.voiceEnabled) return;
+  // Common lines are kept on disk, so after the first launch this costs nothing.
+  voice.setDiskCache(path.join(app.getPath('userData'), 'voice-cache'));
   (async () => {
     for (const id of [agent, ...AGENTS.filter((a) => a !== agent)]) {
       const p = persona(id, cfg);
@@ -2258,5 +2263,9 @@ app.on('will-quit', () => {
 // A background buddy: closing the Skills Hub (or anything else) never quits it.
 // Quit from the 👀 menu instead.
 app.on('window-all-closed', () => {});
-app.on('before-quit', () => console.log('[app] quitting'));
+app.on('before-quit', () => {
+  const spent = usage.summary();
+  if (spent) console.log(spent);
+  console.log('[app] quitting');
+});
 process.on('exit', (code) => console.log(`[app] exited with code ${code}`));
