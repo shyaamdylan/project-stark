@@ -19,9 +19,12 @@
       <div id="bubble" class="hit hidden">
         <div id="say"></div>
         <form id="ask" class="hidden" autocomplete="off">
-          <input id="ask-input" type="text" placeholder="What should I find? e.g. “share”" spellcheck="false" />
+          <input id="ask-input" type="text" placeholder="e.g. “switch to Slack”, “organise for coding”" spellcheck="false" />
         </form>
       </div>
+
+      <!-- Square stop button, shown whenever the buddy is talking, working or waiting -->
+      <button id="stop" class="hit hidden" type="button" title="Stop (or type “stop”)" aria-label="Stop"><span></span></button>
 
       <svg id="char" class="hit" viewBox="0 0 140 160" width="140" height="160">
         <defs>

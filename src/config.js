@@ -5,7 +5,12 @@
 //   2. ~/Library/Application Support/Project Alpha/.env (for the packaged app)
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { DEFAULT_CLOSABLE, PROFILES } = require('./organize');
+
+const list = (v) => String(v || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
+const expandHome = (p) => (p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
 
 function parseEnv(text) {
   const out = {};
@@ -41,6 +46,14 @@ function loadConfig(userDataDir) {
 
   const get = (k, def = '') => process.env[k] || fileVals[k] || def;
 
+  // JARVIS_WORKSPACE_<NAME>=App, App adds or replaces a focus profile, so
+  // "organise for <name>" keeps exactly those apps.
+  const profiles = { ...PROFILES };
+  for (const [k, v] of Object.entries({ ...fileVals, ...process.env })) {
+    const m = k.match(/^JARVIS_WORKSPACE_([A-Z0-9_]+)$/);
+    if (m && v) profiles[m[1].toLowerCase().replace(/_/g, ' ')] = list(v);
+  }
+
   return {
     loadedFrom,
     elevenLabs: {
@@ -52,6 +65,13 @@ function loadConfig(userDataDir) {
     anthropicApiKey: get('ANTHROPIC_API_KEY'),
     openaiApiKey: get('OPENAI_API_KEY'),
     voiceEnabled: get('VOICE_ENABLED', '1') !== '0',
+    jarvis: {
+      // Only windows of these apps may be closed by "clean up" (always after asking once).
+      closableApps: get('JARVIS_CLOSABLE_APPS') ? list(get('JARVIS_CLOSABLE_APPS')) : DEFAULT_CLOSABLE,
+      profiles,
+      projectDirs: list(get('JARVIS_PROJECT_DIRS')).map(expandHome),
+      editor: get('JARVIS_EDITOR'),
+    },
   };
 }
 

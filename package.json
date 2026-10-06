@@ -31,7 +31,7 @@
       ],
       "extendInfo": {
         "LSUIElement": true,
-        "NSAppleEventsUsageDescription": "Project Alpha uses System Events to find buttons in the app you're using so it can point at them."
+        "NSAppleEventsUsageDescription": "Project Alpha uses System Events to find buttons, arrange your windows, and switch to open browser tabs."
       }
     }
   }

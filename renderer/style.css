@@ -284,3 +284,39 @@ body {
   0%, 100% { box-shadow: 0 0 0 4px var(--accent-glow), 0 0 24px var(--accent-glow); }
   50% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0.15), 0 0 32px var(--accent-glow); }
 }
+
+/* ---------- stop button (TV-remote style square) ---------- */
+
+#stop {
+  position: absolute;
+  left: -30px;
+  bottom: 54px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: #241a4d;
+  box-shadow: 0 4px 10px rgba(40, 20, 120, 0.3);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+#stop span {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: #fff;
+}
+#stop:hover {
+  background: #e5484d;
+  transform: scale(1.08);
+}
+#stop:active {
+  transform: scale(0.94);
+}
+
+#say {
+  white-space: pre-line;
+}

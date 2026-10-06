@@ -28,7 +28,7 @@ the app:
    lets it read button names and positions. In dev mode the permission goes to your
    **terminal app** (Terminal, iTerm, VS Code), because that's what launched Electron.
 2. **Automation → System Events.** Click *OK* on the popup the first time you ask
-   for something.
+   for something. Switching to browser tabs asks once per browser (Safari, Chrome…) too.
 
 ## Using it
 
@@ -41,6 +41,60 @@ the app:
 
 It searches the frontmost app's window, including web pages in Safari, Chrome and other
 Chromium browsers, and that app's menu bar.
+
+### Switching, opening and finding
+
+The same prompt understands what kind of thing you mean, and prefers whatever is already
+open: switching to it is faster than opening a second copy.
+
+| You type | It does |
+| --- | --- |
+| `switch to slack`, `open slack` | Brings the open Slack window forward (launches Slack if it isn't running) |
+| `go to gmail`, `open github.com` | Switches to the tab that's already on that site, otherwise opens it |
+| `open the budget spreadsheet`, `open Q3 report.pdf` | Opens the file (Spotlight search, recent files first). If it's already open, switches to it |
+| `find my tax return pdf`, `where did I put the invoice` | Reveals the file in Finder |
+| `open project stark`, `work on budget-api` | Opens the project folder in your editor |
+| `search youtube for lofi`, `google best pizza near me` | Runs the search in your browser |
+
+Words like *file*, *spreadsheet*, *pdf*, *project*, *folder*, *website* and *app* steer the
+choice. If something else matched almost as well, it tells you ("Not it? There's also…").
+Requests about buttons (`where's the share button`) still point on screen, and a bare word
+that isn't on screen (`spotify`) falls back to opening it.
+
+### Workspace
+
+| You type | It does |
+| --- | --- |
+| `organise my workspace` | Keeps the app you're using, tiles its windows, minimises the rest. Never asks, never closes |
+| `organise for coding`, `keep safari and code` | Keeps those apps (profiles: coding, writing, design, email, chat, meeting) |
+| `clean up my workspace` | Same, plus asks **once** whether to close windows of safe apps (browsers, Finder, Preview…) |
+| `undo`, `put it back` | Restores every moved or minimised window to where it was |
+
+Rules it follows:
+
+- Arranging and minimising are automatic and always undoable.
+- Closing only happens after one grouped question listing the windows: answer `yes`,
+  `no`, `2`, `1 and 3` or `all but 2`. No answer within 90 seconds means close nothing.
+  Windows you don't pick are minimised instead.
+- Terminals and edited documents are never closed. Calls (Zoom, FaceTime, Teams, Meet)
+  and full-screen windows are never touched.
+- If a window asks "Save changes?", it stops closing and leaves the dialog to you.
+- Windows it closed can't be reopened by `undo` (in a browser, ⌘⇧T brings them back).
+- Removing Mission Control desktops isn't supported yet: macOS has no public API for it, and
+  doing it safely means moving windows off a desktop first.
+
+Add your own profiles or closable apps in `.env` (see `JARVIS_*` in `.env.example`).
+
+### Stopping
+
+Type `stop` (or `Jarvis stop`, `Friday stop`, `cancel`, `never mind`), press **Esc**, click the
+square **■** button that appears beside the buddy whenever it's talking, working or waiting
+for an answer, or choose **Stop** in the 👀 menu. It goes quiet, drops any question it asked
+(nothing gets closed), and abandons half-finished work. Either name works as a wake word:
+`Jarvis, open slack` / `Friday, switch to mail`.
+
+Hands-free microphone listening isn't built yet; everything above is typed. When it is, stop
+will send it back to waiting for "Jarvis" or "Friday".
 
 ## API keys
 

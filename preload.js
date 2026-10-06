@@ -6,8 +6,10 @@ contextBridge.exposeInMainWorld('buddy', {
   setInteractive: (on) => ipcRenderer.send('set-interactive', on),
   openPrompt: () => ipcRenderer.send('open-prompt'),
   promptClosed: () => ipcRenderer.send('prompt-closed'),
+  answer: (text) => ipcRenderer.send('answer', text),
+  stop: () => ipcRenderer.send('stop'),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'question', 'stopped'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

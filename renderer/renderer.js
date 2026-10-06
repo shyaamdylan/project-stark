@@ -10,6 +10,7 @@ const eyes = $('eyes');
 const spot = $('spot');
 const spotLabel = $('spot-label');
 const pointer = $('pointer');
+const stopBtn = $('stop');
 
 const SIZE = { w: 140, h: 160, bottom: 4 };
 const EYES = [
@@ -34,6 +35,9 @@ const state = {
   audio: null,
   sayTimer: null,
   speechId: 0,
+  runId: 0, // bumped by stop() so in-flight work is ignored
+  question: false, // waiting for the user's answer to a yes/no/numbers question
+  stopShown: false,
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -99,6 +103,7 @@ function eyeLoop() {
     idleGlance = null;
   }
   lookAt(target);
+  syncStopButton();
   requestAnimationFrame(eyeLoop);
 }
 
@@ -293,7 +298,47 @@ function systemSpeak(text, id) {
   });
 }
 
+// ---------- stop ----------
+
+// The ■ button is there whenever the buddy is doing anything at all.
+function syncStopButton() {
+  const active = state.busy || state.question || state.promptOpen || buddyEl.classList.contains('talking');
+  if (active !== state.stopShown) {
+    state.stopShown = active;
+    stopBtn.classList.toggle('hidden', !active);
+  }
+}
+
+// Drop everything: speech, pointing, questions, half-finished requests.
+function stop({ tellMain = true } = {}) {
+  state.runId++;
+  stopSpeaking();
+  clearTimeout(state.sayTimer);
+  clearPointing();
+  buddyEl.classList.remove('thinking', 'excited', 'worried', 'walking');
+  state.question = false;
+  askInput.placeholder = DEFAULT_PLACEHOLDER;
+  closePrompt({ refocus: false });
+  state.busy = false;
+  sayEl.textContent = '';
+  bubble.classList.add('hidden');
+  if (tellMain) window.buddy.stop();
+  setX(parseFloat(getComputedStyle(buddyEl).left) || state.x); // freeze mid-walk
+  setTimeout(() => {
+    if (!state.busy) walkTo(homeX());
+  }, 400);
+}
+
+const STOP_WORDS = /^\s*(?:(?:hey|ok|okay)\s+)?(?:(?:jarvis|friday)[\s,.!]*)?(?:stop(?: it| that| listening| talking| now)?|cancel|never ?mind|be quiet|shut up|shush|enough|go to sleep|abort)(?:[\s,]+(?:jarvis|friday))?[\s.!]*$/i;
+
+stopBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  stop();
+});
+
 // ---------- asking ----------
+
+const DEFAULT_PLACEHOLDER = askInput.placeholder;
 
 function openPrompt() {
   if (state.busy) return;
@@ -311,6 +356,8 @@ function openPrompt() {
 
 function closePrompt({ refocus = true } = {}) {
   if (!state.promptOpen) return;
+  // A pending question is answered "no" if the prompt is dismissed.
+  if (state.question) return answerQuestion('no');
   state.promptOpen = false;
   askForm.classList.add('hidden');
   askInput.blur();
@@ -318,7 +365,38 @@ function closePrompt({ refocus = true } = {}) {
   if (refocus) window.buddy.promptClosed();
 }
 
+// Main asked us something (e.g. "close these 3 windows?"): show it and wait.
+function showQuestion(q) {
+  state.question = true;
+  clearPointing();
+  buddyEl.classList.remove('thinking');
+  say(q.text, { speak: false, hold: 600000 });
+  if (state.voice !== 'off') voiceOut(q.speak || q.text, state.speechId);
+  state.promptOpen = true;
+  askForm.classList.remove('hidden');
+  askInput.value = '';
+  askInput.placeholder = 'yes, no, or numbers like “1 3”';
+  showBubble();
+  setTimeout(() => askInput.focus(), 30);
+}
+
+function answerQuestion(text) {
+  state.question = false;
+  askInput.placeholder = DEFAULT_PLACEHOLDER;
+  state.promptOpen = false;
+  askForm.classList.add('hidden');
+  askInput.blur();
+  stopSpeaking();
+  window.buddy.answer(text);
+  window.buddy.promptClosed(); // hand focus and the mouse back to your apps
+  state.interactive = false;
+  buddyEl.classList.add('thinking');
+  say('Okay…', { speak: false });
+}
+
 async function handleAsk(text) {
+  if (STOP_WORDS.test(text)) return stop();
+  const myRun = ++state.runId;
   state.busy = true;
   closePrompt({ refocus: false });
   window.buddy.setInteractive(false);
@@ -331,11 +409,20 @@ async function handleAsk(text) {
   } catch (e) {
     res = { ok: false, say: 'Oops, something went wrong.' };
   }
+  if (myRun !== state.runId) return; // stopped while we were working
   buddyEl.classList.remove('thinking');
+  if (res.kind === 'stopped') return stop({ tellMain: false });
+
+  // Organising, switching, opening: nothing to point at, just report.
+  if (res.ok && res.kind === 'done') {
+    await say(res.say, { mood: res.mood || 'happy', hold: 1500 });
+    if (myRun === state.runId) state.busy = false;
+    return;
+  }
 
   if (!res.ok) {
     await say(res.say, { mood: 'worried', hold: 1500 });
-    state.busy = false;
+    if (myRun === state.runId) state.busy = false;
     return;
   }
 
@@ -348,6 +435,7 @@ async function handleAsk(text) {
   sayEl.textContent = '';
   bubble.classList.add('hidden');
   await walkTo(standX);
+  if (myRun !== state.runId) return;
 
   state.lookOverride = center;
   const hand = pointArmAt(center);
@@ -358,29 +446,35 @@ async function handleAsk(text) {
   await say(res.say, { mood: 'happy', hold: 2500 });
   await flight;
   await sleep(1500);
+  if (myRun !== state.runId) return;
 
   clearPointing();
   buddyEl.classList.remove('excited');
   hideBubbleIfIdle();
   await sleep(300);
   await walkTo(homeX());
-  state.busy = false;
+  if (myRun === state.runId) state.busy = false;
 }
 
 askForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = askInput.value.trim();
+  if (state.question) return STOP_WORDS.test(text) ? stop() : answerQuestion(text);
   if (text) handleAsk(text);
 });
 
 askInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closePrompt();
+  if (e.key === 'Escape') {
+    if (state.question) answerQuestion('no');
+    else if (state.busy) stop();
+    else closePrompt();
+  }
 });
 
 askInput.addEventListener('blur', () => {
   // Clicked away into another app: close quietly.
   setTimeout(() => {
-    if (state.promptOpen && document.activeElement !== askInput && !state.busy) closePrompt({ refocus: false });
+    if (state.promptOpen && !state.question && document.activeElement !== askInput && !state.busy) closePrompt({ refocus: false });
   }, 150);
 });
 
@@ -409,6 +503,8 @@ window.buddy.on('cursor', (p) => {
   state.cursor = p;
 });
 window.buddy.on('open-prompt', openPrompt);
+window.buddy.on('question', showQuestion);
+window.buddy.on('stopped', () => stop({ tellMain: false }));
 window.buddy.on('say', (m) => say(m.text, { mood: m.mood, hold: 2500 }));
 window.buddy.on('config', (c) => {
   state.voice = c.voice;
