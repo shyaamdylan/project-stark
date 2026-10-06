@@ -1064,6 +1064,17 @@ body.island #buddy.dormant #plasma {
   opacity: 0.55;
 }
 
+/* Resting (left alone a while): the floating and notch layouts tuck their
+   cards away too; the island closes itself (renderer.js fitShell). */
+body.resting:not(.island) #bubble,
+body.resting:not(.island) #caption,
+body.resting:not(.island) #activity,
+body.resting:not(.island) #rec,
+body.resting:not(.island) #status,
+body.resting:not(.island) #agent-tag {
+  display: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .swirl,
   #body,

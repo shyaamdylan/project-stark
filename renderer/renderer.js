@@ -58,6 +58,7 @@ const state = {
   pointerStyle: 'mixed', // 'mixed', 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
   pointerMode: null, // what's out on screen now: 'ring' or 'cursor'
   wakingUntil: 0, // heard its name mid-sentence: look awake until the request arrives
+  resting: false, // left alone a while: shrunk to the dormant look (see QUIET_MS)
   macAudio: false, // another app is playing sound the mic can hear
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
@@ -92,7 +93,7 @@ function frame(t) {
   const dy = state.cursor.y - c.y;
   const d = Math.hypot(dx, dy) || 1;
   // Resting, it stays still: motion is kept for when something is happening.
-  const reach = awake() ? Math.min(14, d / 40) : 0;
+  const reach = awake() && !state.resting ? Math.min(14, d / 40) : 0;
   glintEl.style.transform = `translate(${(dx / d) * reach}px, ${(dy / d) * reach}px)`;
 
   let target = 0;
@@ -121,8 +122,40 @@ function frame(t) {
 // it's doing right now, so you can always tell at a glance.
 const statusEl = $('status');
 let shownStatus = null;
+// ---------- resting when left alone ----------
+//
+// After a while with nothing happening (no speech either way, no step, no
+// typing, no hover), it shrinks back to its small dormant form, even with a
+// lesson or a question still open: nothing is lost, it just gets out of the
+// way. The next thing that happens brings it straight back.
+const QUIET_MS = 15000;
+let lastActivity = Date.now();
+function active() {
+  lastActivity = Date.now();
+  if (state.resting) {
+    state.resting = false;
+    document.body.classList.remove('resting');
+    shownStatus = null; // redraw the awake look
+    fitShell();
+  }
+}
+setInterval(() => {
+  if (state.resting) return;
+  const busyNow = ['talking', 'hearing', 'thinking'].some((c) => buddyEl.classList.contains(c)) || state.typingAnswer || state.guideTyping || state.promptOpen;
+  if (busyNow) {
+    lastActivity = Date.now();
+    return;
+  }
+  if (Date.now() - lastActivity < QUIET_MS) return;
+  state.resting = true;
+  document.body.classList.add('resting');
+  shownStatus = null;
+  fitShell();
+}, 1000);
+
 function showStatus() {
-  const isAwake = awake();
+  // Resting looks dormant, whatever is still open underneath.
+  const isAwake = awake() && !state.resting;
   const talking = buddyEl.classList.contains('talking');
   const thinking = buddyEl.classList.contains('thinking');
   const hearing = buddyEl.classList.contains('hearing');
@@ -486,6 +519,7 @@ function stopSpeaking() {
 // Show text in the bubble and speak it. Resolves when finished talking.
 // show: false speaks it without the bubble (the task panel shows it instead).
 async function say(text, { mood, hold = 0, speak = true, show = true } = {}) {
+  active();
   clearTimeout(state.sayTimer);
   stopSpeaking();
   const id = state.speechId;
@@ -827,7 +861,10 @@ function stopGuide() {
   queueGuide(goHome);
 }
 
-window.buddy.on('guide-step', receiveStep);
+window.buddy.on('guide-step', (step) => {
+  active();
+  receiveStep(step);
+});
 const nextBtn = $('guide-next');
 function guideThinking() {
   buddyEl.classList.add('thinking');
@@ -925,6 +962,7 @@ $('act-stop').addEventListener('click', () => stopJarvis());
 
 window.buddy.on('jarvis-step', (step) =>
   queueGuide(async () => {
+    active();
     updateActivity(step);
     if (step.say) say(step.say, { mood: 'happy', hold: 60000, speak: !step.quiet, show: false });
     if (step.rect) await pointTo(step.rect, step.label, Infinity);
@@ -933,6 +971,7 @@ window.buddy.on('jarvis-step', (step) =>
 
 let afterStop = null; // what they asked for in the same breath as "stop"
 window.buddy.on('jarvis-state', (j) => {
+  active();
   if (!j.running && afterStop) {
     const next = afterStop;
     afterStop = null;
@@ -1212,6 +1251,7 @@ function onHead(wav, id) {
 }
 
 function wakeUp() {
+  active();
   if (state.wakingUntil > Date.now()) return;
   state.wakingUntil = Date.now() + WAKING_MS;
   flare();
@@ -1385,6 +1425,7 @@ function updateMic() {
       minSpeechMs: () => (state.listening ? 200 : state.answering ? 320 : 450),
       gain: () => (buddyEl.classList.contains('talking') ? 2.5 : 1),
       onStart: () => {
+        if (isActive()) active(); // talking to it (not just room noise while dormant)
         // You might be talking over it: dip its voice until we know it's words.
         bargeStart();
         clearTimeout(autoSendTimer);
@@ -1422,6 +1463,7 @@ let listenTimeout = null;
 const LISTEN_PROMPTS = { ask: 'Listening…', confirm: '', 'teach-name': 'What are you going to show me?' };
 
 function startListening(mode) {
+  active();
   if (state.listening) return cancelListening(); // second press cancels
   if (state.teaching) {
     showCaption("I'm already listening. Say \"I'm done\" when you've finished.");
@@ -1509,6 +1551,7 @@ window.buddy.on('listen', ({ mode }) => startListening(mode));
 // `forward: true` we still receive mousemove, so flip as the cursor enters.
 document.addEventListener('mousemove', (e) => {
   const over = !!e.target.closest('.hit');
+  if (over || e.target.closest('#shell')) active(); // hovering it wakes it
   const want = over || state.promptOpen || state.typingAnswer || state.guideTyping;
   if (want !== state.interactive) {
     state.interactive = want;
@@ -1532,7 +1575,7 @@ function fitShell() {
   }
   // Open while awake, or while anything in it is showing (a greeting, a question).
   const showing = [...shellIn.children].some((el) => el.id !== 'island-bar' && !el.classList.contains('hidden'));
-  const open = buddyEl.classList.contains('awake') || showing;
+  const open = !state.resting && (buddyEl.classList.contains('awake') || showing);
   shell.classList.toggle('open', open);
   // Closed, it's a small nub around the resting orb (sized in CSS).
   shell.style.width = open ? `${shellIn.offsetWidth}px` : '';
