@@ -71,16 +71,18 @@ You get the step (what to do, the decision the expert made in their case, the ex
 
 - ok true when the value fits the expert's reasoning and guardrails for this case, or when the screen doesn't show enough to say it's wrong. Don't nag about formatting or anything the expert's reasoning doesn't cover.
 - ok false only when it clearly goes against the expert's reason, rule or a guardrail for this case. Then say, out loud, in two or three short sentences: stop them before they move on or save ("Hold on, the expert would stop here."), explain why using the expert's own reasoning applied to what's on screen now, and ask them to change it. Don't lecture.
-- target_id: the field or thing to look at, from the list, or null.`;
+- target_id: the field or thing to look at, from the list, or null.
+- praise (if ok): what an expert watching over their shoulder would say, a few spoken words that name why it's right for this case. "" if not ok.`;
 
 const JUDGE_SCHEMA = {
   type: 'object',
   properties: {
     ok: { type: 'boolean' },
     say: { type: 'string' },
+    praise: { type: 'string' },
     target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
   },
-  required: ['ok', 'say', 'target_id'],
+  required: ['ok', 'say', 'praise', 'target_id'],
   additionalProperties: false,
 };
 
@@ -92,15 +94,17 @@ const EXPECT_SYSTEM = `You are Friday, a warm, sharp teacher on someone's Mac, t
 You get the step (what to do, the expert's decision in their case, the expert's reason in their own words, any rule and guardrails), the field, what it holds now, and their screen: a screenshot and the accessibility list. Read the case's details off the screen (amounts, item types, names, dates, flags).
 
 - expected: the exact values the expert's reasoning allows here, as they'd be typed (a code, a number, an option's name). [] when the screen doesn't show enough to be sure, or the field is free text. Never guess.
-- say_if_wrong: what you'd say out loud if they enter anything else, in two or three short sentences: stop them before they move on or save ("Hold on, the expert would stop here."), explain why using the expert's own reasoning applied to what's on screen now, and ask them to change it. "" if expected is [].`;
+- say_if_wrong: what you'd say out loud if they enter anything else, in two or three short sentences: stop them before they move on or save ("Hold on, the expert would stop here."), explain why using the expert's own reasoning applied to what's on screen now, and ask them to change it. "" if expected is [].
+- say_if_right: what an expert watching over their shoulder would say if they enter one of the expected values, a few spoken words that name why it's right for this case. "" if expected is [].`;
 
 const EXPECT_SCHEMA = {
   type: 'object',
   properties: {
     expected: { type: 'array', items: { type: 'string' } },
     say_if_wrong: { type: 'string' },
+    say_if_right: { type: 'string' },
   },
-  required: ['expected', 'say_if_wrong'],
+  required: ['expected', 'say_if_wrong', 'say_if_right'],
   additionalProperties: false,
 };
 
@@ -129,7 +133,12 @@ const TRIGGERS = {
   'off-path': (d) => `They did something other than the current instruction (${d}).`,
   lost: (d) => `${d} They may be somewhere else.`,
   idle: (d) => `Nothing has happened for ${d} seconds since your last instruction.`,
+  sync: (d) => `(A quiet check, not something they said.) ${d} Work out which plan step they're on now from what they've done and the screen: step_number with then "resume", and say "" unless something is clearly wrong.`,
 };
+
+// Spotter mode, told on every turn of a spotting session (in the turn, not the
+// system prompt, so the cached system prompt stays the same for both modes).
+const SPOTTING = `Mode: spotting. They're doing this on their own while you watch over their shoulder, like an expert with an apprentice. Don't give them the steps unless they ask. When they ask whether something is right ("is that good?", "is that correct?", "did I do that right?"), "that" is what they just did (the log, the field they're in, the screen, the decisions so far): check it against the expert's reasoning and guardrails and answer honestly and specifically, confirming with the reason, or saying what to change. Keep step_number on the step they're actually on.`;
 
 class Tutor {
   constructor(apiKey, skill, { client = null } = {}) {
@@ -187,7 +196,7 @@ class Tutor {
   // value (what it holds now), expertValue, scan, image, where }.
   async expect(ctx) {
     const step = this.skill.map.steps[ctx.stepNumber - 1];
-    if (!step) return { expected: [], sayIfWrong: '' };
+    if (!step) return { expected: [], sayIfWrong: '', sayIfRight: '' };
     const screen = describeScreen((ctx.scan && ctx.scan.elements) || [], { withPicture: Boolean(ctx.image) });
     const text = [...this.stepFacts(step, ctx, screen), `The field: "${ctx.label}", holding "${ctx.value || ''}" now.`].join('\n');
     const response = await this.client.beta.messages.create({
@@ -202,9 +211,9 @@ class Tutor {
     try {
       const r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
       const expected = Array.isArray(r.expected) ? r.expected.map(String).filter((v) => v.trim()) : [];
-      return { expected, sayIfWrong: expected.length ? String(r.say_if_wrong || '') : '' };
+      return { expected, sayIfWrong: expected.length ? String(r.say_if_wrong || '') : '', sayIfRight: expected.length ? String(r.say_if_right || '') : '' };
     } catch {
-      return { expected: [], sayIfWrong: '' };
+      return { expected: [], sayIfWrong: '', sayIfRight: '' };
     }
   }
 
@@ -232,7 +241,7 @@ class Tutor {
     }
     const ok = r.ok !== false || !String(r.say || '').trim();
     if (!ok) this.notes.push(`At step ${ctx.stepNumber} they entered "${ctx.value}" in "${ctx.label}", and you stopped them: "${r.say}"`);
-    return { ok, say: ok ? '' : r.say, target: Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null };
+    return { ok, say: ok ? '' : r.say, praise: ok ? String(r.praise || '') : '', target: Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null };
   }
 
   messages() {
@@ -261,6 +270,7 @@ class Tutor {
     const parts = [];
     if (!this.turns.length) parts.push(`Lesson plan:\n${describeSkill(this.skill)}`);
     // What happened between turns (a decision she stopped them on), so "why?" makes sense.
+    if (ctx.spotting) parts.push(SPOTTING);
     if (this.notes.length) parts.push(`Since your last turn:\n${this.notes.splice(0).map((n) => `- ${n}`).join('\n')}`);
     parts.push(
       `Where the lesson is: step ${l.stepNumber || '?'} of ${l.totalSteps || '?'}. Current instruction: "${l.line || ''}"${l.skipped && l.skipped.length ? `. Steps they've chosen to skip: ${l.skipped.join(', ')}` : ''}.`,
@@ -309,6 +319,16 @@ class Tutor {
 // "Done", "I've done that", "finished", "next": the step's done, said out loud.
 const DONE_WORDS = /^(?:(?:ok(?:ay)?|right|yep|yeah|cool|great|so)[\s,.!]*)*(?:(?:i'?ve|i have|i'?m|that'?s|it'?s|all)\s+)?(?:done|finished|did (?:it|that)|completed?(?: it| that)?|next(?: step)?)(?:\s+(?:that|it|this|this step|that step|that bit|now|too))*[\s.!]*$/i;
 
+// Spotting: how often a quiet "where are they?" check may run, and how long a
+// stray click is left to play out first.
+const SYNC_GAP_MS = 20000;
+const SYNC_DELAY_MS = 4000;
+// Spotting: a general word of approval after this many steps and this long
+// without her saying anything.
+const CHEER_EVERY_STEPS = 3;
+const CHEER_GAP_MS = 45000;
+const CHEERS = ['Looking good so far.', "That's all going the right way.", 'Nice and steady, keep going.', "You're doing this right."];
+
 // The lesson: the replay for speed, the observer for awareness, the tutor for judgment.
 class Lesson {
   // deps:
@@ -323,8 +343,9 @@ class Lesson {
   //   spot               Spotter mode: watch quietly while they work, and only
   //                      speak up for a wrong decision or a guardrail (no step
   //                      instructions, no pointing, no check-ins)
-  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 12000, offPathDelayMs = 900, now = () => Date.now(), spot = false }) {
+  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 12000, offPathDelayMs = 900, now = () => Date.now(), spot = false, syncDelayMs = SYNC_DELAY_MS }) {
     this.spot = spot;
+    this.syncDelayMs = syncDelayMs;
     this.flags = 0; // things flagged (wrong decisions, guardrails), for the wrap-up
     this.snap = snap;
     this.skill = skill;
@@ -360,7 +381,31 @@ class Lesson {
     if (tutor && typeof tutor.concern === 'function') this.replay.concern = (a, s) => this.concernStep(a, s);
     if (tutor && typeof tutor.judge === 'function') this.replay.judge = (a, field, s) => this.judgeStep(a, field, s);
     if (tutor && typeof tutor.expect === 'function') this.replay.expect = (a, s) => this.expectStep(a, s);
-    this.replay.onLost = (why) => !spot && this.schedule('lost', why, 0);
+    this.replay.onLost = (why) => (spot ? this.sync(why, 0) : this.schedule('lost', why, 0));
+    // Spotting: a different route is their business, but she still has to know
+    // where they are, so a quiet check (nothing said) puts the lesson back in step.
+    if (spot) this.replay.onOffPath = (why) => this.sync(`They ${why}.`, this.syncDelayMs);
+    this.replay.onJudged = (a, field, verdict) => this.judged(a, field, verdict);
+    this.lastSyncAt = 0;
+    this.lastStepSeen = 0;
+    this.stepsSinceSpoke = 0;
+    this.praise = '';
+    this.cheers = 0;
+  }
+
+  // Spotting: find out quietly which step they're on (at most every SYNC_GAP_MS).
+  sync(why, delay) {
+    if (this.now() - this.lastSyncAt < SYNC_GAP_MS) return;
+    this.lastSyncAt = this.now();
+    this.schedule('sync', why, delay);
+  }
+
+  // Every checked decision is a fact for the next turn ("is that right?"), and
+  // when spotting, a right one earns a word of approval as they move on.
+  judged(a, field, verdict) {
+    if (!verdict || !verdict.ok || !field) return;
+    if (this.tutor && Array.isArray(this.tutor.notes)) this.tutor.notes.push(`At step ${a.stepIndex + 1} they entered "${field.value}" in "${field.label || a.label}", which fits the expert's reasoning.`);
+    if (this.spot && verdict.praise) this.praise = verdict.praise;
   }
 
   get total() {
@@ -414,7 +459,7 @@ class Lesson {
       this.lastSpokeAt = this.now();
       this.nudges = 0;
     }
-    return { ok: r.ok, say: r.say };
+    return { ok: r.ok, say: r.say, praise: r.praise || '' };
   }
 
   lines() {
@@ -474,6 +519,7 @@ class Lesson {
     if (step.status === 'step' && step.say) {
       this.lastSpokeAt = this.now();
       this.nudges = 0;
+      this.stepsSinceSpoke = 0;
     }
     if (step.status !== 'step') this.running = false;
     this.emitOut(step);
@@ -497,7 +543,27 @@ class Lesson {
       return { ...step, say: this.flags ? `All done. I flagged ${this.flags === 1 ? 'one thing' : `${this.flags} things`} along the way.` : 'All done, nothing to flag.' };
     }
     if (step.status !== 'step' || step.flagged || step.chat) return step;
-    return { ...step, say: '', note: '', target: null, quietMove: true, spotting: true };
+    return { ...step, say: this.cheer(step), note: '', target: null, quietMove: true, spotting: true };
+  }
+
+  // A word of approval now and then, as an expert watching would: right after a
+  // decision they got right (in the expert's reasoning), otherwise after a run
+  // of steps done without her saying anything.
+  cheer(step) {
+    const n = step.stepNumber || 0;
+    if (n <= this.lastStepSeen) return '';
+    this.stepsSinceSpoke += n - this.lastStepSeen;
+    this.lastStepSeen = n;
+    const praise = this.praise;
+    this.praise = '';
+    if (praise) return this.cheered(praise);
+    if (this.stepsSinceSpoke >= CHEER_EVERY_STEPS && this.now() - this.lastSpokeAt >= CHEER_GAP_MS) return this.cheered(CHEERS[this.cheers++ % CHEERS.length]);
+    return '';
+  }
+
+  cheered(text) {
+    this.stepsSinceSpoke = 0;
+    return text;
   }
 
   checkIdle() {
@@ -519,7 +585,7 @@ class Lesson {
       return;
     }
     this.busy = true;
-    this.thinking();
+    if (trigger !== 'sync') this.thinking(); // a quiet check shows nothing
     const since = this.lastAskedAt || this.lastSpokeAt - 1;
     this.lastAskedAt = this.now();
     try {
@@ -532,6 +598,7 @@ class Lesson {
         lesson: this.replay.where() || {},
         scan: this.replay.latest,
         image,
+        spotting: this.spot,
       });
       if (this.running) await this.apply(r);
     } catch (err) {
@@ -554,6 +621,14 @@ class Lesson {
       this.running = false;
       this.emitOut({ status: r.status === 'done' ? 'done' : 'stuck', say: r.say || (r.status === 'done' ? "That's it, you've done it." : "Okay, we'll stop there."), target: null, stepNumber: (this.replay.where() || {}).stepNumber, totalSteps: this.total });
       this.stop();
+      return;
+    }
+    // Spotting: move to where they are without a word (the replay's own line is
+    // never said), then say her answer, if any.
+    if (this.spot) {
+      const here = (this.replay.where() || {}).stepNumber;
+      if (r.then === 'resume' && r.stepNumber && r.stepNumber !== here) await this.replay.jumpToStep(r.stepNumber);
+      if (r.say) this.emitOut({ status: 'step', say: r.say, note: '', target: r.target, stepNumber: (this.replay.where() || {}).stepNumber, totalSteps: this.total, chat: true, quietMove: true });
       return;
     }
     // Back on the plan: the replay carries on from that step, with her words.

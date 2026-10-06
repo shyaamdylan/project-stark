@@ -185,6 +185,8 @@ class Replay {
     //   guardrails (that isn't a decision to fill in) comes up, whether the
     //   record on screen triggers one; if so it's said before they act.
     this.concern = null;
+    //   onJudged(action, field, verdict): a decision was checked ({ ok, say, praise }).
+    this.onJudged = null;
   }
 
   // Steps where what's entered is a decision, not just a click: the expert's
@@ -232,7 +234,7 @@ class Replay {
     const r = exp.result || (await Promise.race([exp.promise, new Promise((resolve) => setTimeout(() => resolve(null), 2500))]));
     if (!r || !Array.isArray(r.expected) || !r.expected.length) return null;
     const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/[\s._-]/g, '').replace(/^0+(?=\d)/, '');
-    if (r.expected.some((v) => norm(v) === norm(field.value))) return { ok: true, say: '' };
+    if (r.expected.some((v) => norm(v) === norm(field.value))) return { ok: true, say: '', praise: r.sayIfRight || '' };
     return r.sayIfWrong ? { ok: false, say: r.sayIfWrong } : null;
   }
 
@@ -254,6 +256,7 @@ class Replay {
       this.judging = false;
     }
     if (!this.running || this.action !== a) return;
+    if (this.onJudged) this.onJudged(a, field, verdict);
     if (verdict.ok) return this.complete();
     // Wait for a different value, then check that one.
     this.target = field;

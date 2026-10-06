@@ -201,3 +201,49 @@ test('Spotter: steps move on silently, a wrong click gets no comment, and a guar
   assert.equal(emitted.at(-1).status, 'done');
   assert.equal(emitted.at(-1).say, 'All done. I flagged one thing along the way.');
 });
+
+test('Spotter keeps up: a different route gets a quiet check of where they are, and nothing is said', async () => {
+  const emitted = [];
+  const seen = [];
+  const tutor = { turn: async (ctx) => (seen.push(ctx), { say: '', target: null, stepNumber: 3, then: 'resume', skipSteps: [], status: 'continue' }) };
+  const lesson = new Lesson({ skill, scan: async () => ({ app: 'Acme', window: 'Report', elements: [exportBtn, prefs, save] }), emit: (s) => emitted.push(s), tutor, spot: true, syncDelayMs: 10 });
+  lesson.replay.loop = async () => {};
+  await lesson.start();
+  lesson.onMouseDown(210, 15); // somewhere the plan didn't expect
+  await tick(80);
+  lesson.onMouseDown(210, 15); // and again: checks are spaced out
+  await tick(80);
+  lesson.stop();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].trigger, 'sync');
+  assert.equal(seen[0].spotting, true);
+  assert.equal(lesson.replay.where().stepNumber, 3, 'the lesson moved to where they are');
+  assert.ok(emitted.every((e) => !e.say), 'nothing said');
+});
+
+test('Spotter answers "is that right?" with the decisions so far, and approves now and then', async () => {
+  let t = 0;
+  const seen = [];
+  const emitted = [];
+  const tutorFake = { notes: [], turn: async (ctx) => (seen.push(ctx), { say: "Yes, that one fits the expert's rule.", target: null, stepNumber: null, then: 'wait', skipSteps: [], status: 'continue' }) };
+  const lesson = new Lesson({ skill, scan: async () => ({ app: 'Acme', window: 'Report', elements: [exportBtn, prefs, save] }), emit: (s) => emitted.push(s), tutor: tutorFake, spot: true, now: () => t });
+  lesson.replay.loop = async () => {};
+  await lesson.start();
+  // A decision checked and found right: a fact for later, and a word of approval as they move on.
+  lesson.judged({ stepIndex: 0, label: 'Code' }, { label: 'Code', value: 'A1' }, { ok: true, say: '', praise: 'Good, that code suits this one.' });
+  assert.match(tutorFake.notes[0], /entered "A1" in "Code", which fits/);
+  assert.equal(lesson.spotted({ status: 'step', stepNumber: 2, say: 'line' }).say, 'Good, that code suits this one.');
+  // A plain run of steps: quiet at first, then a general word once it's been a while.
+  assert.equal(lesson.spotted({ status: 'step', stepNumber: 3, say: 'line' }).say, '');
+  t += 60000;
+  assert.equal(lesson.spotted({ status: 'step', stepNumber: 4, say: 'line' }).say, '');
+  assert.match(lesson.spotted({ status: 'step', stepNumber: 5, say: 'line' }).say, /\w/, 'three steps on, a while since she spoke');
+  // Asked whether it's right: the tutor is told it's spotting, and the answer is said.
+  lesson.onUserSays('is that right?');
+  await tick(20);
+  lesson.stop();
+  assert.equal(seen[0].trigger, 'said');
+  assert.equal(seen[0].spotting, true);
+  assert.equal(emitted.at(-1).say, "Yes, that one fits the expert's rule.");
+  assert.equal(emitted.at(-1).chat, true);
+});

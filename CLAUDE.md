@@ -39,7 +39,10 @@ screen before the lesson moves on; a wrong one is stopped and explained in the e
 Spotter (`spot: true` on the Lesson; "spot me on…" or the hub's Spot me) is the same lesson
 run quietly: steps move on silently, no pointing or check-ins, and only a wrong decision or a
 guardrail that applies to the record on screen (`Tutor.concern`, asked as that step comes up)
-is said.
+is said. It still keeps up: a different route gets a quiet
+check of which step they're on (nothing said). Questions ("is that right?") go to the tutor told
+it's spotting, with each checked decision as a fact. A right decision earns the expert's reason as
+approval, and a run of quiet steps a short word now and then.
 
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
