@@ -259,6 +259,27 @@ async function squeezeOut(target) {
   return { x: c.x + ux * D, y: c.y + uy * D };
 }
 
+// The orb lights up (full size and brightness, even from dormant) for the
+// spark to squeeze out of it, or to swallow it back, then settles again.
+// It doesn't open the panel: it's only the orb.
+const LIGHT_MS = 300; // how long a dormant orb takes to swell
+async function lightUp() {
+  const wasDim = buddyEl.classList.contains('dormant') && !buddyEl.classList.contains('lit');
+  buddyEl.classList.add('lit');
+  if (wasDim) await sleep(LIGHT_MS);
+}
+function lightDown() {
+  buddyEl.classList.remove('lit');
+}
+
+// Where a spark leaves or rejoins the orb when heading to or from `p`: just
+// outside wherever the orb is right now (it may have moved since).
+function orbEdgeToward(p) {
+  const c = orbCenter();
+  const a = Math.atan2(p.y - c.y, p.x - c.x);
+  return { x: c.x + Math.cos(a) * SQUEEZE_DIST, y: c.y + Math.sin(a) * SQUEEZE_DIST };
+}
+
 // The reverse: the droplet arrives at `from` and melts back into the orb.
 async function absorb(from) {
   const c = orbCenter();
@@ -417,9 +438,11 @@ async function pointTo(rect, label, taps = 3, { warn = false } = {}) {
   }
   // Arrive: the spark squeezes out and flies there, then blooms into the ring.
   if (style === 'arrive') {
-    flare();
     spot.classList.add('hidden');
+    await lightUp();
+    flare();
     state.exit = await squeezeOut(center);
+    lightDown();
     await flySpark(state.exit, center);
     await spark.animate(
       [{ transform: `translate(${center.x}px, ${center.y}px) scale(1)`, opacity: 1 }, { transform: `translate(${center.x}px, ${center.y}px) scale(2.4)`, opacity: 0 }],
@@ -438,8 +461,11 @@ async function pointTo(rect, label, taps = 3, { warn = false } = {}) {
     await cursorToSpark(state.pointerAt);
     await flySpark(state.pointerAt, center);
   } else {
+    // Out of the orb: it lights up, squeezes the droplet out, then settles.
+    await lightUp();
     flare();
     state.exit = await squeezeOut(center);
+    lightDown();
     await flySpark(state.exit, center);
   }
   showSpot(rect, label);
@@ -465,10 +491,16 @@ async function goHome() {
   homing = (async () => {
     spot.classList.add('hidden');
     await cursorToSpark(from);
-    await flySpark(from, state.exit);
+    // The orb lights up to take it back (it swells while the spark flies),
+    // swallows it, and goes back to however it was.
+    const lit = lightUp();
+    const back = orbEdgeToward(from);
+    await flySpark(from, back);
+    await lit;
     spark.classList.add('hidden');
-    await absorb(state.exit);
+    await absorb(back);
     clearPointing();
+    lightDown();
   })();
   try {
     await homing;

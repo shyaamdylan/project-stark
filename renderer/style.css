@@ -133,6 +133,24 @@ body[data-agent='jarvis'] #reactor {
 #buddy.dormant #plasma {
   opacity: 0.72;
 }
+/* Lit: a spark is squeezing out of the orb or coming back into it. Even a
+   dormant orb is full and moving for that moment, then settles again. */
+#buddy.dormant.lit #goo-glow,
+#buddy.dormant.lit #plasma {
+  opacity: 1;
+}
+#buddy.dormant.lit .swirl,
+#buddy.dormant.lit #body,
+#buddy.dormant.lit #plasma {
+  animation-play-state: running;
+}
+body.island #buddy.dormant.lit {
+  --orb: 24px;
+}
+body.island #buddy.dormant.lit #goo-glow,
+body.island #buddy.dormant.lit #plasma {
+  opacity: 1;
+}
 /* Resting is still: no swirl, no pulse. Motion means something is happening. */
 #buddy.dormant .swirl,
 #buddy.dormant #body,
@@ -1112,6 +1130,9 @@ body.island #plasma {
 }
 body.island #reactor {
   inset: -5px;
+}
+body.island #goo {
+  filter: url(#goo-small);
 }
 /* The droplet that squeezes out, in proportion to the smaller orb. */
 body.island #neck {
