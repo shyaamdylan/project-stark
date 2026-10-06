@@ -102,7 +102,8 @@ async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', a
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
-    system: system(voice),
+    // Over the 512-token minimum, so repeat calls read it from the prompt cache.
+    system: [{ type: 'text', text: system(voice), cache_control: { type: 'ephemeral' } }],
     messages: [
       {
         role: 'user',

@@ -38,7 +38,7 @@ test('a vague question is answered from the screen, pointing at what it is about
   const msg = client.sent[0].messages[0].content;
   assert.match(msg, /What's in front of them: Acme — "Notes"/);
   assert.match(msg, /button \| "Sync"/);
-  assert.match(client.sent[0].system, /assume it's about what's on their screen/);
+  assert.match(client.sent[0].system[0].text, /assume it's about what's on their screen/);
 });
 
 test('a request to do something is handed back as a task', async () => {

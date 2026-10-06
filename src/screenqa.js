@@ -63,7 +63,8 @@ async function answerAboutScreen(apiKey, { question, scan, agent = 'friday', add
     betas: ['server-side-fallback-2026-07-01'],
     fallbacks: 'default',
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
-    system: system(voice),
+    // Over the 512-token minimum, so repeat calls read it from the prompt cache.
+    system: [{ type: 'text', text: system(voice), cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: `${history ? `Recent conversation (read the question in light of it):\n${history}\n\n` : ''}They asked: "${question}"\n\nWhat's in front of them: ${screenContext(scan)}\n\nOn screen:\n${screen.text || '(nothing readable)'}` }],
   });
   if (response.stop_reason !== 'end_turn') return { kind: 'task', say: '', target: null, needsPicture: false };
