@@ -973,6 +973,25 @@ body.island[data-island-edge='right'] #shell {
 body.island[data-island-edge='bottom'] #shell {
   border-radius: 20px 20px 0 0;
 }
+/* Leaving the corner: the corner that's coming off the bezel rounds first,
+   then it slides. Coming back: it slides home first, then squares off.
+   (Delays per property: width, height, border-radius, translate.) */
+body.island #shell {
+  transition-delay: 0s, 0s, 0.5s, 0s;
+}
+body.island #shell:not(.open) {
+  transition-delay: 0.16s, 0.16s, 0.5s, 0s;
+}
+body.island:is([data-island-edge='right'], [data-island-edge='bottom']) #shell {
+  transition-duration: 0.5s, 0.5s, 0.2s, 0.55s;
+  transition-delay: 0s, 0s, 0s, 0.16s;
+}
+body.island:is([data-island-edge='right'], [data-island-edge='bottom']) #shell:not(.open) {
+  transition-delay: 0.16s, 0.16s, 0s, 0.16s;
+}
+body.island:is([data-island-edge='right'], [data-island-edge='bottom']) #orb {
+  transition-delay: 0s, 0s, 0s, 0.16s; /* the orb sets off with the shape */
+}
 body.island #shell-in {
   display: flex;
   flex-direction: column;
