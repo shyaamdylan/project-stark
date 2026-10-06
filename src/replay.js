@@ -169,6 +169,41 @@ class Replay {
     //   onLost(why)     the thing for the current action isn't on screen
     this.onOffPath = null;
     this.onLost = null;
+    //   judge(action, field, scan) -> { ok, say }: at a judgment call or a step
+    //   with guardrails, is what they filled in right for the case in front of
+    //   them? Until it says ok, the lesson doesn't move on.
+    this.judge = null;
+    this.judging = false;
+  }
+
+  // Steps where what's entered is a decision, not just a click: the expert's
+  // judgment calls and anything with a guardrail.
+  needsJudging(a) {
+    const step = this.skill.map.steps[a.stepIndex];
+    return Boolean(step && (step.is_judgment || (step.guardrails || []).length));
+  }
+
+  // Check a filled-in decision before moving on. Wrong for this case: say why
+  // (in the expert's reasoning) and wait for them to change it, then check again.
+  async checkJudgment(a, field, s) {
+    this.judging = true;
+    this.thinking();
+    let verdict = { ok: true, say: '' };
+    try {
+      verdict = (await this.judge(a, field, s)) || verdict;
+    } catch (err) {
+      console.error('[replay] judgment check', err.message);
+    } finally {
+      this.judging = false;
+    }
+    if (!this.running || this.action !== a) return;
+    if (verdict.ok) return this.complete();
+    // Wait for a different value, then check that one.
+    this.target = field;
+    this.baseValue = field.value;
+    this.editSeenAt = 0;
+    this.progressAt = Date.now();
+    this.emit({ status: 'step', say: verdict.say, note: '', target: field, stepNumber: a.stepIndex + 1, totalSteps: this.total, chat: true, flagged: true });
   }
 
   get total() {
@@ -280,12 +315,20 @@ class Replay {
 
   onScan(s) {
     this.latest = s;
-    if (!this.running || this.recovering || !this.action) return;
+    if (!this.running || this.recovering || this.judging || !this.action) return;
     const a = this.action;
     const view = this.viewOf(s);
 
     if (a.kind !== 'go' && !this.completing) {
       const ahead = this.aheadOf(s);
+      // Moving on past a decision they've filled in: check it first, never skip it.
+      if (ahead > this.index && a.kind === 'edit' && this.judge && this.needsJudging(a)) {
+        const field = locate(a, s.elements);
+        if (field && field.value !== this.baseValue) {
+          this.checkJudgment(a, field, s);
+          return;
+        }
+      }
       if (ahead > this.index) {
         this.index = ahead;
         this.recoveries = 0;
@@ -340,7 +383,8 @@ class Replay {
           this.target = field;
           this.editSeenAt = Date.now();
         } else if (this.editSeenAt && Date.now() - this.editSeenAt >= SETTLE_MS) {
-          this.complete();
+          if (this.judge && this.needsJudging(a)) this.checkJudgment(a, field, s);
+          else this.complete();
         }
       }
       return;
@@ -351,7 +395,7 @@ class Replay {
   }
 
   onMouseDown(x, y) {
-    if (!this.running || this.recovering || !this.action) return;
+    if (!this.running || this.recovering || this.judging || !this.action) return;
     const a = this.action;
     if (a.kind === 'any-click') return this.complete(150);
     if ((a.kind === 'click') && this.target && inside(x, y, this.target)) return this.complete(120);

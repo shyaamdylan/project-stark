@@ -126,6 +126,11 @@ sitting next to you rather than a click-through tutorial:
 - **She sees what you do.** She gets a screenshot of the front window each time she's asked,
   plus Accessibility (buttons, fields, values, which window, where you're typing), and pairs your clicks and keys with
   what's under them, so she knows "you clicked Preferences" or "you typed Q3 into Search".
+- **She catches wrong decisions.** At a step where the expert made a judgment call or set a
+  guardrail, what you fill in is checked against the expert's reasoning for the case on your
+  screen before she moves on. Code a €7,200 equipment invoice to opex and she stops you: "Hold
+  on, the expert would stop here. Equipment over €5,000 is always capex." Change it and she
+  checks again.
 - **On track, she keeps up instantly.** Do the step and she's onto the next one, no waiting.
 - **Off track, she helps.** "That opened Preferences. Close it, then click Export." Got there
   another way? She accepts it and carries on.

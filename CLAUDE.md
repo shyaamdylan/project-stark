@@ -32,6 +32,10 @@ can't find something, or say something. `src/observe.js` gives it the facts: wha
 typed, and which window and field they're in, from the accessibility scan, plus a screenshot of the screen each turn. When
 she gets something wrong, give her more of those facts rather than another rule.
 
+At a judgment call or a step with guardrails, what the learner fills in is checked
+(`Tutor.judge`) against the expert's decision, reason and guardrails for the case on their
+screen before the lesson moves on; a wrong one is stopped and explained in the expert's words.
+
 Tidying a taught skill (`refineMap`) happens once per skill and is saved with `refined`; never
 make it run per lesson.
 

@@ -148,3 +148,45 @@ test('the thing pointed at moves (a scroll, a dragged window): the pointer follo
   assert.equal(emitted.at(-1).quietMove, true);
   assert.deepEqual([emitted.at(-1).target.x, emitted.at(-1).target.y], [300, 120]);
 });
+
+const settle = async (r, value) => {
+  r.onScan(scanOf('Bill', [cost(value)]));
+  r.editSeenAt -= 2000;
+  r.onScan(scanOf('Bill', [cost(value)]));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+};
+
+test('a wrong decision at a judgment step is stopped, explained, and checked again once changed', async () => {
+  const { r, emitted } = makeReplay([scanOf('Bill', [cost('')])]);
+  const judged = [];
+  r.judge = async (a, field) => {
+    judged.push(field.value);
+    return field.value === '0400' ? { ok: true } : { ok: false, say: 'Hold on, the expert would stop here: equipment over the limit is capex.' };
+  };
+  r.index = 3; // "Set the cost center" (a judgment call with a guardrail)
+  r.point();
+  await settle(r, '4711');
+  assert.equal(r.index, 3, 'not moved on');
+  assert.equal(emitted.at(-1).flagged, true);
+  assert.match(emitted.at(-1).say, /would stop here/);
+  // Same value again: no second check, no moving on.
+  r.onScan(scanOf('Bill', [cost('4711')]));
+  assert.deepEqual(judged, ['4711']);
+  await settle(r, '0400');
+  assert.deepEqual(judged, ['4711', '0400']);
+  assert.equal(emitted.at(-1).status, 'done');
+});
+
+test('steps that are not decisions are never sent for checking', async () => {
+  const plain = { ...skill, map: { ...skill.map, steps: skill.map.steps.map((st) => ({ ...st, is_judgment: false, guardrails: [] })) } };
+  const emitted = [];
+  let current = scanOf('Bill', [cost('')]);
+  const r = new Replay({ skill: plain, scan: async () => current, emit: (x) => emitted.push(x), recover: async () => ({ status: 'stuck' }) });
+  r.running = true;
+  r.latest = current;
+  r.judge = async () => assert.fail('should not judge');
+  r.index = 3;
+  r.point();
+  await settle(r, '9999');
+  assert.equal(emitted.at(-1).status, 'done');
+});

@@ -148,3 +148,25 @@ test('the tutor gets the plan once, and only the latest screens', async () => {
   assert.ok(!/Lesson plan/.test(msgs[4].content));
   assert.match(msgs[4].content, /They said: "why\?"/);
 });
+
+test("Friday checks a filled-in decision against the expert's reasoning, and remembers stopping them", async () => {
+  const decisionSkill = {
+    map: {
+      title: 'Code a supplier invoice',
+      summary: 'Book each bill to a cost center.',
+      steps: [{ title: 'Set the cost center', action: 'Choose the cost center.', event_ids: [], is_judgment: true, decision: 'Re-coded to capex', reason: 'Equipment over the limit is always capex.', rule: null, guardrails: [{ kind: 'stop_and_ask', text: 'Unknown supplier: ask the controller.', qa_id: null }] }],
+    },
+    session: { events: [], qas: [] },
+  };
+  const sent = [];
+  const client = { beta: { messages: { create: async (req) => (sent.push(req), { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({ ok: false, say: 'Hold on, the expert would stop here. This is equipment over the limit, so it goes to capex.', target_id: 0 }) }] }) } } };
+  const t = new Tutor('k', decisionSkill, { client });
+  const field = el('AXTextField', 'Cost center', { value: '4711' });
+  const r = await t.judge({ stepNumber: 1, label: 'Cost center', value: '4711', expertValue: '0400', scan: { app: 'Acme', elements: [field] } });
+  assert.equal(r.ok, false);
+  assert.match(r.say, /would stop here/);
+  assert.equal(r.target.label, 'Cost center');
+  const prompt = sent[0].messages[0].content;
+  for (const fact of ['Equipment over the limit is always capex.', 'The learner entered "4711"', 'The expert entered "0400"', 'Unknown supplier: ask the controller.']) assert.ok(prompt.includes(fact), fact);
+  assert.equal(t.notes.length, 1, 'the next tutor turn hears about it');
+});

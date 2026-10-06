@@ -63,6 +63,27 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
+// Checking a decision the learner filled in, at a judgment call or a step with
+// guardrails, before the lesson moves on (and before they save it).
+const JUDGE_SYSTEM = `You are Friday, a warm, sharp teacher on someone's Mac. You're teaching them a task an expert showed you. They've just filled in a decision at a step where the expert used judgment or where there are guardrails. Decide whether what they entered is right for the case in front of them now, which may differ from the expert's own case.
+
+You get the step (what to do, the decision the expert made in their case, the expert's reason in their own words, any rule and guardrails), what the learner entered, and their screen: a screenshot and the accessibility list. Read the case's details off the screen (amounts, item types, names, dates, flags).
+
+- ok true when the value fits the expert's reasoning and guardrails for this case, or when the screen doesn't show enough to say it's wrong. Don't nag about formatting or anything the expert's reasoning doesn't cover.
+- ok false only when it clearly goes against the expert's reason, rule or a guardrail for this case. Then say, out loud, in two or three short sentences: stop them before they move on or save ("Hold on, the expert would stop here."), explain why using the expert's own reasoning applied to what's on screen now, and ask them to change it. Don't lecture.
+- target_id: the field or thing to look at, from the list, or null.`;
+
+const JUDGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    say: { type: 'string' },
+    target_id: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+  },
+  required: ['ok', 'say', 'target_id'],
+  additionalProperties: false,
+};
+
 const TRIGGERS = {
   said: (d) => `They said: "${d}"`,
   'off-path': (d) => `They did something other than the current instruction (${d}).`,
@@ -76,6 +97,47 @@ class Tutor {
     this.skill = skill;
     this.turns = []; // { text, screen, reply }
     this.chosen = [];
+    this.notes = []; // things that happened outside a turn (a decision she stopped), told on the next one
+  }
+
+  // Is the decision they filled in right for this case? ctx: { stepNumber,
+  // label, value, expertValue, scan, image, where }. Returns { ok, say, target }.
+  async judge(ctx) {
+    const step = this.skill.map.steps[ctx.stepNumber - 1];
+    if (!step) return { ok: true, say: '', target: null };
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const lines = [
+      `Task: ${this.skill.map.title}${this.skill.map.summary ? ` (${this.skill.map.summary})` : ''}`,
+      `Step ${ctx.stepNumber}: ${step.title}`,
+      `Do: ${step.action}`,
+      step.decision ? `The expert's decision in their own case: ${step.decision}` : '',
+      ctx.expertValue != null && ctx.expertValue !== '' ? `The expert entered "${ctx.expertValue}" in "${ctx.label}" for their case.` : '',
+      step.reason ? `The expert's reason, in their words: "${step.reason}"` : '',
+      step.rule ? `Rule: ${step.rule}` : '',
+      ...(step.guardrails || []).map((g) => `Guardrail (${g.kind.replace(/_/g, ' ')}): ${g.text}`),
+      `The learner entered "${ctx.value}" in "${ctx.label}".`,
+      `Where they are: ${ctx.where || 'unknown'}`,
+      `On screen now:\n${screen.text || '(nothing readable)'}`,
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 1500,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: JUDGE_SCHEMA } },
+      system: [{ type: 'text', text: JUDGE_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: ctx.image ? [imageBlock(ctx.image), { type: 'text', text: `${screenshotNote(ctx.image)}\n${text}` }] : text }],
+    });
+    let r;
+    try {
+      r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+    } catch {
+      return { ok: true, say: '', target: null };
+    }
+    const ok = r.ok !== false || !String(r.say || '').trim();
+    if (!ok) this.notes.push(`At step ${ctx.stepNumber} they entered "${ctx.value}" in "${ctx.label}", and you stopped them: "${r.say}"`);
+    return { ok, say: ok ? '' : r.say, target: Number.isInteger(r.target_id) ? screen.chosen[r.target_id] || null : null };
   }
 
   messages() {
@@ -100,6 +162,8 @@ class Tutor {
     const l = ctx.lesson || {};
     const parts = [];
     if (!this.turns.length) parts.push(`Lesson plan:\n${describeSkill(this.skill)}`);
+    // What happened between turns (a decision she stopped them on), so "why?" makes sense.
+    if (this.notes.length) parts.push(`Since your last turn:\n${this.notes.splice(0).map((n) => `- ${n}`).join('\n')}`);
     parts.push(
       `Where the lesson is: step ${l.stepNumber || '?'} of ${l.totalSteps || '?'}. Current instruction: "${l.line || ''}"${l.skipped && l.skipped.length ? `. Steps they've chosen to skip: ${l.skipped.join(', ')}` : ''}.`,
       `What they've done since you last spoke:\n${ctx.did && ctx.did.length ? ctx.did.map((x) => `- ${x}`).join('\n') : '- nothing'}`,
@@ -185,11 +249,33 @@ class Lesson {
       thinking,
     });
     this.replay.onOffPath = (why) => this.schedule('off-path', why, this.offPathDelayMs);
+    if (tutor && typeof tutor.judge === 'function') this.replay.judge = (a, field, s) => this.judgeStep(a, field, s);
     this.replay.onLost = (why) => this.schedule('lost', why, 0);
   }
 
   get total() {
     return this.replay.total;
+  }
+
+  // A decision they filled in, checked against the expert's reasoning for the
+  // case on their screen. Counts as her speaking, so no idle nudge right after.
+  async judgeStep(a, field, s) {
+    const image = await this.snap(s).catch(() => null);
+    const r = await this.tutor.judge({
+      stepNumber: a.stepIndex + 1,
+      label: field.label || a.label,
+      value: field.value == null ? '' : String(field.value),
+      expertValue: a.value,
+      scan: s,
+      image,
+      where: this.observer.where(),
+    });
+    console.log(`[lesson] step ${a.stepIndex + 1}: "${field.value}" in "${field.label || a.label}" → ${r.ok ? 'fine' : 'stopped them'}`);
+    if (!r.ok) {
+      this.lastSpokeAt = this.now();
+      this.nudges = 0;
+    }
+    return { ok: r.ok, say: r.say };
   }
 
   lines() {
