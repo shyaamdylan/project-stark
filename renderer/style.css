@@ -1094,6 +1094,17 @@ body.island #plasma {
 body.island #reactor {
   inset: -5px;
 }
+/* The droplet that squeezes out, in proportion to the smaller orb. */
+body.island #neck {
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+}
+body.island #drop {
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+}
 body.island #glint {
   width: 10px;
   height: 10px;

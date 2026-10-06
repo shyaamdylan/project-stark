@@ -231,11 +231,9 @@ top centre on every screen.
 - **Nothing is sent without a yes.** Pressing Return in a message or form field counts as
   sending, so Jarvis shows exactly what will go ("Ready to send "See you at 6" from "Message".
   Send it?") first. Search and address bars are exempt.
-- **Pointing saves the fun for when it counts.** The first time it points in a conversation, a
-  spark squeezes out of the orb and lands as a ring around the thing; after that the ring glides
-  from target to target. Jarvis always uses the ring (never a cursor that looks like yours), and
-  Friday's lessons keep the hopping spark cursor. `POINTER_STYLE=highlight` is always the ring,
-  `POINTER_STYLE=spark` always the cursor.
+- **Pointing.** Friday squeezes a spark out of the orb that becomes the cursor and glides from one
+  target to the next. Jarvis uses a calm ring while he works, so it's never mistaken for your mouse.
+  `POINTER_STYLE=highlight` is always the ring, `POINTER_STYLE=spark` always the cursor.
 - **Jarvis shows his work.** While he does a task, a small panel by the orb shows the task, the
   current step, a progress bar and Stop.
 - Cards follow the Mac's light or dark appearance.

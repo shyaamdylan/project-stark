@@ -93,7 +93,7 @@ function frame(t) {
   const dy = state.cursor.y - c.y;
   const d = Math.hypot(dx, dy) || 1;
   // Resting, it stays still: motion is kept for when something is happening.
-  const reach = awake() && !state.resting ? Math.min(14, d / 40) : 0;
+  const reach = lively() ? Math.min(14, d / 40) : 0;
   glintEl.style.transform = `translate(${(dx / d) * reach}px, ${(dy / d) * reach}px)`;
 
   let target = 0;
@@ -153,9 +153,15 @@ setInterval(() => {
   fitShell();
 }, 1000);
 
+// Is something going on right now (a lesson, a task, a conversation, or it's
+// thinking, talking or hearing you)? Then the orb looks fully awake, even
+// while the panel is folded away for being left alone.
+function lively() {
+  return awake() || state.busy || ['talking', 'thinking', 'hearing'].some((c) => buddyEl.classList.contains(c));
+}
+
 function showStatus() {
-  // Resting looks dormant, whatever is still open underneath.
-  const isAwake = awake() && !state.resting;
+  const isAwake = lively();
   const talking = buddyEl.classList.contains('talking');
   const thinking = buddyEl.classList.contains('thinking');
   const hearing = buddyEl.classList.contains('hearing');
@@ -371,18 +377,17 @@ function goHomeLater(ms = LINGER_MS) {
   }, ms);
 }
 
-// How to point this time. "mixed" (the default) keeps the playful spark for
-// the moments it means something and the calm ring for the rest:
-//   - the first point in a conversation: the spark squeezes out of the orb and
-//     lands as a ring, so you see the answer come from it
-//   - after that, while something's still pointed at: the ring glides on
-//   - Jarvis at work: always the ring, never a cursor that looks like yours
-//   - Friday's lessons: the spark cursor, hopping step to step ("follow me")
+// How to point this time. "mixed" (the default): Friday squeezes a spark out
+// of the orb that becomes the cursor and glides from target to target; Jarvis,
+// while he works, uses a calm ring, never a cursor that looks like yours.
+// POINTER_STYLE=spark or highlight uses one everywhere.
 function pointStyleNow() {
   if (state.pointerStyle !== 'mixed') return state.pointerStyle;
+  // Jarvis at work: a ring, never a cursor that could be mistaken for yours.
   if (state.executing) return 'highlight';
-  if (state.guiding) return 'spark';
-  return state.pointerAt ? 'highlight' : 'arrive';
+  // Friday: the spark squeezes out of the orb and becomes the cursor, gliding
+  // from one thing to the next.
+  return 'spark';
 }
 
 // warn: a decision she's stopped them on; the ring turns amber and says "Check this".
