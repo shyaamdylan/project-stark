@@ -24,9 +24,11 @@ contextBridge.exposeInMainWorld('buddy', {
   // Heard its name: start reading the screen while they finish the sentence.
   prepare: () => ipcRenderer.send('prepare'),
   // The corner island's size, so it can be kept clear of the cursor and the Dock.
+  avoidSpeech: (text) => ipcRenderer.send('avoid-speech', text),
+  avoidTarget: (rect) => ipcRenderer.send('avoid-target', rect),
   islandBox: (box) => ipcRenderer.send('island-box', box),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio', 'repoint', 'unpoint', 'show-result', 'island-offset'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio', 'repoint', 'unpoint', 'show-result', 'island-offset', 'discussed-target'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

@@ -413,7 +413,24 @@ function pointStyleNow() {
 }
 
 // warn: a decision she's stopped them on; the ring turns amber and says "Check this".
+// Keep the intended control click-through even while the assistant is moving.
+let releaseTargetTimer = null;
+function protectTarget(rect) {
+  clearTimeout(releaseTargetTimer);
+  if (rect) state.protectedTarget = rect;
+  else releaseTargetTimer = setTimeout(() => { state.protectedTarget = null; }, 12000);
+  window.buddy.avoidTarget(rect);
+  if (targetHasCursor(state.cursor) && state.interactive) {
+    state.interactive = false;
+    window.buddy.setInteractive(false);
+  }
+}
+function targetHasCursor(p) {
+  const r = state.protectedTarget;
+  return Boolean(r && p && p.x >= r.x - 24 && p.x <= r.x + r.w + 24 && p.y >= r.y - 24 && p.y <= r.y + r.h + 24);
+}
 async function pointTo(rect, label, taps = 3, { warn = false } = {}) {
+  protectTarget(rect);
   state.spotWarn = warn;
   clearTimeout(homeTimer);
   if (homing) await homing; // already on its way back: let it land, then go out again
@@ -510,6 +527,7 @@ async function goHome() {
 }
 
 function showSpot(rect, label) {
+  protectTarget(rect);
   const pad = 6;
   // The target may sit in the menu bar, just above our window. Clamp so the
   // ring still shows at the very top edge.
@@ -525,6 +543,7 @@ function showSpot(rect, label) {
 }
 
 function clearPointing() {
+  protectTarget(null);
   state.pointerMode = null;
   spot.classList.add('hidden');
   for (const el of [pointer, spark, dropEl, neckEl, ...trails]) {
@@ -560,6 +579,10 @@ function stopSpeaking() {
 // Show text in the bubble and speak it. Resolves when finished talking.
 // show: false speaks it without the bubble (the task panel shows it instead).
 async function say(text, { mood, hold = 0, speak = true, show = true } = {}) {
+  if (text) {
+    window.buddy.avoidSpeech(text);
+    if (/\b(click|tap|press|choose|select|open|skip|dismiss|continue|submit)\b/i.test(text)) { state.yieldUntil = Date.now() + 20000; setTimeout(() => fitShell(), 0); }
+  }
   active();
   clearTimeout(state.sayTimer);
   stopSpeaking();
@@ -1629,7 +1652,7 @@ window.buddy.on('listen', ({ mode }) => startListening(mode));
 document.addEventListener('mousemove', (e) => {
   const over = !!e.target.closest('.hit');
   if (over || e.target.closest('#shell')) active(); // hovering it wakes it
-  const want = over || state.promptOpen || state.typingAnswer || state.guideTyping;
+  const want = !targetHasCursor({ x: e.clientX, y: e.clientY }) && (over || state.promptOpen || state.typingAnswer || state.guideTyping);
   if (want !== state.interactive) {
     state.interactive = want;
     window.buddy.setInteractive(want);
@@ -1648,6 +1671,7 @@ function fitShell() {
   if (!document.body.classList.contains('island')) {
     shell.classList.remove('open');
     shell.style.width = shell.style.height = '';
+    reportIsland(false);
     return;
   }
   // Open while awake, or while anything in it is showing (a greeting, a question).
@@ -1667,21 +1691,38 @@ function reportIsland(open) {
   const nub = parseFloat(getComputedStyle(shell).getPropertyValue('--nub')) || 46;
   const box = document.body.classList.contains('island')
     ? { w: open ? shellIn.offsetWidth : nub, h: open ? shellIn.offsetHeight : nub, interactive: Boolean(state.answering || state.promptOpen || state.typingAnswer || state.guideTyping || state.listening === 'confirm') }
-    : { w: 0, h: 0, interactive: false };
+    : floatingBox();
+  box.controls = [...shellIn.querySelectorAll('button,input,select,[contenteditable]'), orbEl].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden').map(el => { const r=el.getBoundingClientRect(); const shift=getComputedStyle(document.body.classList.contains('island') ? shell : el).translate.split(' ').map(parseFloat); return {x:r.x-(shift[0]||0),y:r.y-(shift[1]||0),w:r.width,h:r.height}; });
+  box.yieldToCursor = !box.interactive && Boolean(state.guiding || state.executing || Date.now() < (state.yieldUntil || 0));
+  box.yieldUntil = state.guiding || state.executing ? Infinity : (state.yieldUntil || 0);
   const key = JSON.stringify(box);
   if (key === lastBox) return;
   lastBox = key;
   window.buddy.islandBox(box);
 }
 
+// Measure the whole visible assistant in floating/notch layouts as well.
+function floatingBox() {
+  const rects = ['orb','bubble','rec','activity','status'].map(id => $(id)).filter(el => el && !el.classList.contains('hidden') && el.getClientRects().length).map(el => {
+    const r = el.getBoundingClientRect();
+    const shift = getComputedStyle(el).translate.split(' ').map(parseFloat);
+    return {x:r.x-(shift[0]||0),y:r.y-(shift[1]||0),w:r.width,h:r.height};
+  }).filter(r => r.w > 0 && r.h > 0);
+  if (!rects.length) return {w:0,h:0};
+  const x=Math.min(...rects.map(r=>r.x)),y=Math.min(...rects.map(r=>r.y));
+  const w=Math.max(...rects.map(r=>r.x+r.w))-x,h=Math.max(...rects.map(r=>r.y+r.h))-y;
+  return {w,h,home:{x,y,w,h}};
+}
 // Slide clear of the Dock (main.js works out where): the island and the orb
 // move together along the edge they're flush with, smoothly, and back again.
+window.buddy.on('discussed-target', (rect) => { protectTarget(rect); if (rect.transient) protectTarget(null); });
 window.buddy.on('island-offset', ({ x, y, edge }) => {
   document.body.style.setProperty('--island-dx', `${x}px`);
   document.body.style.setProperty('--island-dy', `${y}px`);
   document.body.dataset.islandEdge = edge || '';
 });
 new ResizeObserver(fitShell).observe(shellIn);
+for (const id of ['bubble','rec','activity','status']) if ($(id)) new ResizeObserver(fitShell).observe($(id));
 // Things appearing or hiding (and waking or resting) change what it holds.
 new MutationObserver(fitShell).observe(buddyEl, { attributes: true, attributeFilter: ['class'], subtree: true });
 
@@ -1702,6 +1743,7 @@ window.buddy.on('layout', (l) => {
 
 window.buddy.on('cursor', (p) => {
   state.cursor = p;
+  if (targetHasCursor(p) && state.interactive) { state.interactive = false; window.buddy.setInteractive(false); }
 });
 window.buddy.on('open-prompt', (p) => openPrompt(p || {}));
 window.buddy.on('say', (m) => say(m.text, { mood: m.mood, hold: 2500, speak: m.speak !== false }));

@@ -77,6 +77,7 @@ function appWindows(pid) {
   return { el: el, windows: list(safe(function () { return getAttr(el, 'AXWindows'); }, null)) };
 }
 
+function pair(o,a,b) {if(isNil(o))return null;var m=new RegExp(a+':(-?[\\d.]+) '+b+':(-?[\\d.]+)').exec(ObjC.unwrap(o.description)||'');return m?[parseFloat(m[1]),parseFloat(m[2])]:null;}
 function listAll(opts) {
   var windows = [];
   var tabs = [];
@@ -84,7 +85,9 @@ function listAll(opts) {
     appWindows(a.pid).windows.forEach(function (w, index) {
       var sub = text(safe(function () { return getAttr(w, 'AXSubrole'); }, null));
       if (sub && sub !== 'AXStandardWindow' && sub !== 'AXDialog') return;
-      windows.push({ pid: a.pid, app: a.name, index: index, title: text(safe(function () { return getAttr(w, 'AXTitle'); }, null)), minimized: bool(safe(function () { return getAttr(w, 'AXMinimized'); }, null)) });
+      var pos=pair(safe(function(){return getAttr(w,'AXPosition')},null),'x','y');
+      var size=pair(safe(function(){return getAttr(w,'AXSize')},null),'w','h');
+      windows.push({ rect:pos&&size?{x:pos[0],y:pos[1],w:size[0],h:size[1]}:null,frontmost:$.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier===a.pid,dialog:sub==='AXDialog',edited:bool(safe(function(){return getAttr(w,'AXEdited')},null)),fullscreen:bool(safe(function(){return getAttr(w,'AXFullScreen')},null)),pid: a.pid, app: a.name, index: index, title: text(safe(function () { return getAttr(w, 'AXTitle'); }, null)), minimized: bool(safe(function () { return getAttr(w, 'AXMinimized'); }, null)) });
     });
     if (opts.tabs && BROWSERS[a.name]) {
       safe(function () {
@@ -134,11 +137,39 @@ function tab(opts) {
   return { ok: true };
 }
 
+function manage(opts) {
+  var target=opts.window;
+  var ra=$.NSRunningApplication.runningApplicationWithProcessIdentifier(target.pid);
+  if(isNil(ra)||ObjC.unwrap(ra.localizedName)!==target.app)return {ok:false,error:'App no longer available'};
+  var aw=appWindows(target.pid),matches=aw.windows.filter(function(w){return text(getAttr(w,'AXTitle'))===target.title});
+  // Never guess among duplicate/untitled windows or a stale inventory.
+  if(matches.length!==1)return {ok:false,error:'Window changed or its title is ambiguous'};
+  var w=matches[0];
+  if(text(getAttr(w,'AXSubrole'))==='AXDialog'||bool(getAttr(w,'AXFullScreen')))return {ok:false,error:'Dialog or fullscreen window left alone'};
+  if(opts.kind==='close'){
+    if(bool(getAttr(w,'AXEdited')))return {ok:false,error:'Unsaved document left open'};
+    var button=getAttr(w,'AXCloseButton');if(isNil(button))return {ok:false,error:'No close control'};
+    var err=$.AXUIElementPerformAction(button,$('AXPress'));if(err!==0)return {ok:false,error:'Close refused: '+err};
+    delay(.3);
+    var dialog=appWindows(target.pid).windows.some(function(x){return text(getAttr(x,'AXSubrole'))==='AXDialog'||list(getAttr(x,'AXSheets')).length>0});
+    return {ok:true,dialog:dialog};
+  }
+  if(opts.rect){
+    var se=Application('System Events'),proc=se.processes.whose({unixId:target.pid})[0];
+    var sw=proc.windows.whose({name:target.title});if(sw.length!==1)return {ok:false,error:'Window geometry target changed'};
+    sw[0].position=[opts.rect.x,opts.rect.y];sw[0].size=[opts.rect.w,opts.rect.h];
+  }
+  var minimized=opts.kind==='minimize'||(opts.kind==='restore'&&opts.minimized);
+  var result=$.AXUIElementSetAttributeValue(w,$('AXMinimized'),$.NSNumber.numberWithBool(Boolean(minimized)));
+  return result===0?{ok:true}:{ok:false,error:'Window refused minimisation: '+result};
+}
+
 function run(argv) {
   var opts = JSON.parse(argv[0] || '{}');
   if (!$.AXIsProcessTrusted()) return JSON.stringify({ ok: false, error: 'AX error -25211: assistive access not allowed' });
   var out;
   if (opts.op === 'list') out = listAll(opts);
+  else if (opts.op === 'manage') out = manage(opts);
   else if (opts.op === 'raise') out = raise(opts);
   else if (opts.op === 'tab') out = safe(function () { return tab(opts); }, { ok: false, error: 'could not switch tab' });
   else out = { ok: false, error: 'unknown op' };

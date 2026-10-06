@@ -1,0 +1,240 @@
+{
+  "map": {
+    "title": "Review and code a machinery invoice in Ledra",
+    "summary": "Open the supplier invoice in Ledra and read the line items to decide whether it is new equipment or a repair. New equipment over €5,000 is capital expenditure: override the OCR cost-center suggestion, code it to 0400 and record an asset number before sending for approval. Repairs stay in 4711. Add a short internal note, then send for approval.",
+    "steps": [
+      {
+        "title": "Open the invoice",
+        "action": "Open the bill in Ledra (e.g. BILL-2412 from Hartmann Industrietechnik GmbH). If it's already open, carry on.",
+        "event_ids": [
+          1
+        ],
+        "is_judgment": false,
+        "decision": null,
+        "reason": null,
+        "reason_qa_id": null,
+        "reason_event_id": null,
+        "rule": null,
+        "guardrails": [],
+        "kind": "go",
+        "destination": {
+          "name": "The bill in Ledra",
+          "url": null,
+          "app": "Ledra"
+        },
+        "inferred": false
+      },
+      {
+        "title": "Review line items and classify",
+        "action": "Read the line items, not just the header. Decide whether the invoice is for new equipment or a repair, and check whether the equipment costs more than €5,000.",
+        "event_ids": [
+          2
+        ],
+        "is_judgment": true,
+        "decision": "Classified as new equipment costing over €5,000, so it is capital expenditure.",
+        "reason": "\"New equipment costing more than €5,000 is capital expenditure.\"",
+        "reason_qa_id": 4,
+        "reason_event_id": null,
+        "rule": "New equipment costing more than €5,000 is capital expenditure. Repairs are not and stay in cost center 4711.",
+        "guardrails": [
+          {
+            "kind": "exception",
+            "text": "Repairs stay in cost center 4711 (\"Repairs stay in 4711\").",
+            "qa_id": null
+          },
+          {
+            "kind": "stop_and_ask",
+            "text": "New equipment at €5,000 or less, or an invoice mixing new equipment and repair lines, has not been explained. Ask before coding these.",
+            "qa_id": null
+          }
+        ],
+        "kind": "do",
+        "destination": null,
+        "inferred": false
+      },
+      {
+        "title": "Override the OCR cost center",
+        "action": "Change the Cost center from the OCR suggestion (here 4711) to 0400.",
+        "event_ids": [
+          3
+        ],
+        "is_judgment": true,
+        "decision": "Rejected the OCR suggestion 4711 and coded the invoice to 0400.",
+        "reason": "\"Do not accept the OCR suggestion: code it to 0400, capital expenditure\"",
+        "reason_qa_id": null,
+        "reason_event_id": 2,
+        "rule": "New equipment over €5,000 is coded to cost center 0400, whatever the OCR suggests.",
+        "guardrails": [
+          {
+            "kind": "limit",
+            "text": "Don't accept the OCR cost-center suggestion without checking it against the line items.",
+            "qa_id": null
+          }
+        ],
+        "kind": "do",
+        "destination": null,
+        "inferred": false
+      },
+      {
+        "title": "Record the asset number",
+        "action": "Fill in the Asset number field (e.g. AN-2026-184).",
+        "event_ids": [
+          4
+        ],
+        "is_judgment": false,
+        "decision": null,
+        "reason": "\"Use cost center 0400 and record an asset number before sending for approval.\"",
+        "reason_qa_id": 4,
+        "reason_event_id": null,
+        "rule": "Any invoice coded to 0400 must have an asset number before it is sent for approval.",
+        "guardrails": [
+          {
+            "kind": "limit",
+            "text": "Do not send a capex invoice for approval without an asset number.",
+            "qa_id": 4
+          },
+          {
+            "kind": "stop_and_ask",
+            "text": "Where the asset number comes from, if it isn't on the invoice, was not explained. Ask before proceeding.",
+            "qa_id": null
+          }
+        ],
+        "kind": "do",
+        "destination": null,
+        "inferred": false
+      },
+      {
+        "title": "Add an internal note",
+        "action": "Write a short internal note explaining the coding, e.g. \"New machinery · capital expenditure\".",
+        "event_ids": [
+          5
+        ],
+        "is_judgment": false,
+        "decision": null,
+        "reason": null,
+        "reason_qa_id": null,
+        "reason_event_id": null,
+        "rule": null,
+        "guardrails": [],
+        "kind": "do",
+        "destination": null,
+        "inferred": false
+      },
+      {
+        "title": "Send for approval",
+        "action": "Click \"Send for approval\", but only once the cost center and the asset number are set.",
+        "event_ids": [
+          6
+        ],
+        "is_judgment": false,
+        "decision": null,
+        "reason": null,
+        "reason_qa_id": null,
+        "reason_event_id": null,
+        "rule": null,
+        "guardrails": [],
+        "kind": "do",
+        "destination": null,
+        "inferred": false
+      }
+    ],
+    "open_questions": [
+      "Where do I get the asset number if it isn't on the invoice yet?",
+      "How do I code new equipment that costs five thousand euros or less?",
+      "What do I do if one invoice mixes new equipment and repair lines?"
+    ],
+    "teach_back": "Here's how I understand it: I open the bill in Ledra and read the line items, not just the header. The key call is new equipment versus repair. New equipment over €5,000 is capital expenditure. In that case I don't accept the OCR's cost-center suggestion; I code it to 0400. I must record an asset number before sending it for approval: no asset number, no sending it on. Repairs stay in 4711. I add a short internal note, like \"New machinery · capital expenditure\", then click Send for approval. If equipment is €5,000 or less, if an invoice mixes new equipment and repairs, or if I don't know where the asset number comes from, I stop and ask.",
+    "confirmed": true,
+    "prerequisites": [
+      "Signed in to Ledra",
+      "Supplier invoice already captured in Ledra with an OCR cost-center suggestion"
+    ],
+    "cleanup_notes": [
+      "Made opening the bill a 'go to' step: anyone already in the bill in Ledra can just carry on.",
+      "Added prerequisites the recording assumed: being signed in to Ledra and the invoice already captured with an OCR suggestion."
+    ],
+    "refined": 1
+  },
+  "session": {
+    "title": "Review and code a machinery invoice",
+    "events": [
+      {
+        "id": 1,
+        "t": 4,
+        "type": "screen",
+        "app": "Ledra",
+        "window": "BILL-2412 · Hartmann Industrietechnik GmbH · Ledra",
+        "frame": null
+      },
+      {
+        "id": 2,
+        "t": 1815,
+        "type": "say",
+        "text": "Review the line items first. This is new equipment costing over five thousand euros. Do not accept the OCR suggestion: code it to 0400, capital expenditure, and enter its asset number before approval. Repairs stay in 4711."
+      },
+      {
+        "id": 3,
+        "t": 3381,
+        "type": "edit",
+        "role": "AXTextField",
+        "label": "Cost center",
+        "from": "4711",
+        "to": "0400",
+        "rect": {
+          "x": 279,
+          "y": 257.3359375,
+          "w": 319.5,
+          "h": 36
+        },
+        "frame": null
+      },
+      {
+        "id": 4,
+        "t": 5399,
+        "type": "edit",
+        "role": "AXTextField",
+        "label": "Asset number",
+        "from": "",
+        "to": "AN-2026-184",
+        "rect": {
+          "x": 618.5,
+          "y": 257.3359375,
+          "w": 319.5,
+          "h": 36
+        },
+        "frame": null
+      },
+      {
+        "id": 5,
+        "t": 7408,
+        "type": "edit",
+        "role": "AXTextField",
+        "label": "Internal note",
+        "from": "",
+        "to": "New machinery · capital expenditure",
+        "rect": {
+          "x": 279,
+          "y": 384.4296875,
+          "w": 659,
+          "h": 72
+        },
+        "frame": null
+      },
+      {
+        "id": 6,
+        "t": 8409,
+        "type": "click",
+        "role": "AXButton",
+        "label": "Send for approval",
+        "rect": {
+          "x": 1249.2265625,
+          "y": 84,
+          "w": 147.7734375,
+          "h": 34
+        },
+        "frame": null
+      }
+    ],
+    "qas": []
+  }
+}

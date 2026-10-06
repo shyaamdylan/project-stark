@@ -1,0 +1,50 @@
+<template>
+  <div data-hf-id="hf-sn2d" id="root" data-composition-id="journey" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-tenw" class="clip" id="journey-ground" data-start="0" data-duration="62" data-track-index="0"></div>
+    <div data-hf-id="hf-eoo2" id="journey-title-teach" class="journey-title">Teach Friday.</div>
+    <div data-hf-id="hf-x6sn" id="journey-title-share" class="journey-title">Expertise, captured.</div>
+    <div data-hf-id="hf-qkzs" id="journey-title-learn" class="journey-title">Learn with Friday.</div>
+    <div data-hf-id="hf-pdru" id="journey-title-spot" class="journey-title">Friday, spot me.</div>
+    <div data-hf-id="hf-3rvc" id="journey-window"></div>
+    <video data-hf-id="hf-c4v2" id="journey-teach" class="clip" src="assets/teach.mp4" muted playsinline preload="auto" data-frame-video="approved" data-start="0" data-duration="15" data-track-index="2" data-frame-video-x="320" data-frame-video-y="170" data-frame-video-width="1280" data-frame-video-height="800" data-frame-video-fit="contain"></video>
+    <img data-hf-id="hf-j7mx" id="journey-guide" class="clip" src="assets/guide.png" alt="Recorded skill guide in Friday" data-start="15" data-duration="5" data-track-index="2">
+    <video data-hf-id="hf-appd" id="journey-learn" class="clip" src="assets/learn.mp4" muted playsinline preload="auto" data-frame-video="approved" data-start="20" data-duration="18" data-track-index="2" data-frame-video-x="320" data-frame-video-y="170" data-frame-video-width="1280" data-frame-video-height="800" data-frame-video-fit="contain"></video>
+    <video data-hf-id="hf-m07f" id="journey-spot" class="clip" src="assets/spot.mp4" muted playsinline preload="auto" data-frame-video="approved" data-start="38" data-duration="24" data-track-index="2" data-frame-video-x="320" data-frame-video-y="170" data-frame-video-width="1280" data-frame-video-height="800" data-frame-video-fit="contain"></video>
+    <div data-hf-id="hf-8fej" id="journey-stage-teach" class="journey-stage">01 / TEACH</div>
+    <div data-hf-id="hf-yh7a" id="journey-stage-share" class="journey-stage">02 / SHARE</div>
+    <div data-hf-id="hf-xjvb" id="journey-stage-learn" class="journey-stage">03 / LEARN</div>
+    <div data-hf-id="hf-9tl4" id="journey-stage-spot" class="journey-stage">04 / SPOT</div>
+    <div id="mode-learn-one" class="mode-note">STEP 1 · Check line items → code to 0400</div>
+    <div id="mode-learn-two" class="mode-note">STEP 2 · Enter the asset number</div>
+    <div id="mode-learn-three" class="mode-note">STEP 3 · Send for approval</div>
+    <div id="mode-spot-work" class="mode-note">Working independently · Friday is watching</div>
+    <div id="mode-spot-check" class="mode-note mode-check">CHECK THIS · New equipment, not a repair</div>
+    <div id="mode-spot-fix" class="mode-note">You make the correction and continue</div>
+  </div>
+  <style>
+    .mode-note {position:absolute;left:600px;top:995px;width:1100px;font-size:25px;line-height:1.35;font-weight:500;letter-spacing:-.015em;color:#5EE7FF;opacity:0} .mode-check {color:#FFC978}
+    #root { position:relative; width:100%; height:100%; overflow:hidden; color:#F5F5F7; font-family:system-ui,sans-serif; }
+    [id="journey-ground"] { position:absolute; inset:0; background:#080B10; }
+    [class="journey-title"] { position:absolute; left:120px; top:55px; margin:0; font-size:96px; font-weight:600; line-height:1; letter-spacing:-.04em; }
+    [id="journey-window"] { position:absolute; left:318px; top:168px; width:1284px; height:804px; box-sizing:border-box; border:1px solid #AAB4C033; border-radius:22px; background:#111720; box-shadow:0 18px 60px #00000055; }
+    [id="journey-guide"], [id="journey-teach"], [id="journey-learn"], [id="journey-spot"] { position:absolute; left:320px; top:170px; width:1280px; height:800px; object-fit:contain; border-radius:20px; }
+    [class="journey-stage"] { position:absolute; left:120px; top:1008px; color:#AAB4C0; font-size:20px; line-height:1; letter-spacing:.12em; font-weight:400; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({paused:true});
+    const phases = [['teach',0,15],['share',15,20],['learn',20,38],['spot',38,62]];
+    phases.forEach(([name,start,end]) => {
+      const title = '[id="journey-title-' + name + '"]';
+      const stage = '[id="journey-stage-' + name + '"]';
+      tl.set([title,stage],{opacity:0},0);
+      tl.fromTo(title,{opacity:0,y:5},{opacity:1,y:0,duration:.4,ease:'power2.out',immediateRender:false},start);
+      tl.fromTo(stage,{opacity:0},{opacity:1,duration:.35,ease:'none',immediateRender:false},start);
+      if(end < 62) tl.set([title,stage],{opacity:0},end);
+    });
+    const modeNotes=[['learn-one',20,29],['learn-two',29,34],['learn-three',34,36],['spot-work',38,47],['spot-check',47,56],['spot-fix',56,60.5]];
+    modeNotes.forEach(([name,start,end])=>{const sel='#mode-'+name;tl.set(sel,{opacity:0},0);tl.fromTo(sel,{opacity:0,y:4},{opacity:1,y:0,duration:.25,immediateRender:false},start);tl.set(sel,{opacity:0},end)});
+    window.__timelines['journey'] = tl;
+  </script>
+</template>

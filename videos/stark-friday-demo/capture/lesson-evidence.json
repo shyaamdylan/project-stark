@@ -1,0 +1,155 @@
+[
+  {
+    "status": "step",
+    "say": "This is new equipment. Use 0400 for capital expenditure.",
+    "note": "Don't accept the OCR cost-center suggestion without checking it against the line items.",
+    "target": {
+      "role": "AXTextField",
+      "label": "Cost center",
+      "value": "4711",
+      "x": 279,
+      "y": 257.3359375,
+      "w": 319.5,
+      "h": 36
+    },
+    "stepNumber": 3,
+    "totalSteps": 6,
+    "repeat": false,
+    "take": "learn",
+    "at": 0
+  },
+  {
+    "status": "step",
+    "say": "Hold on, the expert would stop here. The line items show a new servo drive unit at €6,450 plus a cable set, so this is new equipment well over €5,000, not a repair. That makes it capital expenditure, so please change the cost center from the OCR's 4711 to 0400.",
+    "note": "",
+    "target": {
+      "role": "AXTextField",
+      "label": "Cost center",
+      "value": "4711",
+      "x": 279,
+      "y": 257.3359375,
+      "w": 319.5,
+      "h": 36
+    },
+    "stepNumber": 3,
+    "totalSteps": 6,
+    "chat": true,
+    "flagged": true,
+    "take": "learn",
+    "at": 3.2666666666666666
+  },
+  {
+    "status": "step",
+    "say": "Now enter the asset number before approval.",
+    "note": "Do not send a capex invoice for approval without an asset number. Where the asset number comes from, if it isn't on the invoice, was not explained. Ask before proceeding.",
+    "target": {
+      "role": "AXTextField",
+      "label": "Asset number",
+      "value": "",
+      "x": 618.5,
+      "y": 257.3359375,
+      "w": 319.5,
+      "h": 36
+    },
+    "stepNumber": 4,
+    "totalSteps": 6,
+    "repeat": false,
+    "take": "learn",
+    "at": 9.466666666666667
+  },
+  {
+    "status": "step",
+    "say": "Everything is checked. Send it for approval.",
+    "note": "",
+    "target": {
+      "role": "AXButton",
+      "label": "Send for approval",
+      "x": 1249.2265625,
+      "y": 84,
+      "w": 147.7734375,
+      "h": 34
+    },
+    "stepNumber": 6,
+    "totalSteps": 6,
+    "repeat": false,
+    "take": "learn",
+    "at": 15
+  },
+  {
+    "status": "done",
+    "say": "That's it, you've done it: Review and code a machinery invoice in Ledra.",
+    "target": null,
+    "stepNumber": 6,
+    "totalSteps": 6,
+    "take": "learn",
+    "at": 17.2
+  },
+  {
+    "status": "step",
+    "say": "",
+    "note": "",
+    "target": null,
+    "stepNumber": 3,
+    "totalSteps": 6,
+    "repeat": false,
+    "quietMove": true,
+    "spotting": true,
+    "take": "spot",
+    "at": 0
+  },
+  {
+    "status": "step",
+    "say": "Hold on, the expert would stop here. This invoice is a new servo drive unit for €6,450 plus cables, which is new equipment well over €5,000, not a repair, so the OCR's 4711 is wrong. Please change the cost center to 0400, capital expenditure.",
+    "note": "",
+    "target": {
+      "role": "AXTextField",
+      "label": "Cost center",
+      "value": "4711",
+      "x": 279,
+      "y": 257.3359375,
+      "w": 319.5,
+      "h": 36
+    },
+    "stepNumber": 3,
+    "totalSteps": 6,
+    "chat": true,
+    "flagged": true,
+    "take": "spot",
+    "at": 6.4
+  },
+  {
+    "status": "step",
+    "say": "Right, a new servo drive over €5,000 is capex, so 0400.",
+    "note": "",
+    "target": null,
+    "stepNumber": 4,
+    "totalSteps": 6,
+    "repeat": false,
+    "quietMove": true,
+    "spotting": true,
+    "take": "spot",
+    "at": 14.2
+  },
+  {
+    "status": "step",
+    "say": "Good, it's a new servo drive coded to 0400, so it needs an asset number before approval, and AN-2026-219 is in the right format.",
+    "note": "",
+    "target": null,
+    "stepNumber": 6,
+    "totalSteps": 6,
+    "repeat": false,
+    "quietMove": true,
+    "spotting": true,
+    "take": "spot",
+    "at": 22.2
+  },
+  {
+    "status": "done",
+    "say": "All done. I flagged one thing along the way.",
+    "target": null,
+    "stepNumber": 6,
+    "totalSteps": 6,
+    "take": "spot",
+    "at": 24.266666666666666
+  }
+]

@@ -137,4 +137,6 @@ Only use ids from the list.`,
   return { match: r.match === 'one' || picked.length === 1 ? 'one' : 'several', items: picked };
 }
 
-module.exports = { listOpen, rankOpen, matchScore, describe, bringToFront, pickWithClaude };
+async function inventory() {const r=await runJxa({op:'list',excludePid:process.pid,tabs:false});if(r.ok===false)throw new Error(r.error);return r.windows||[];}
+async function changeWindow(action) {const r=await runJxa({op:'manage',...action});if(!r.ok)throw new Error(r.error);return r;}
+module.exports = { inventory, changeWindow, listOpen, rankOpen, matchScore, describe, bringToFront, pickWithClaude };

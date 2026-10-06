@@ -1,0 +1,29 @@
+<template>
+  <style>
+    #root { position:relative; width:100%; height:100%; overflow:hidden; color:#F5F5F7; font-family:system-ui,sans-serif; }
+    .close-ground { position:absolute; inset:0; background:#080B10; }
+    .close-orb { position:absolute; left:865px; top:200px; width:190px; height:190px; object-fit:contain; }
+    .close-wordmark { position:absolute; left:110px; top:465px; width:1700px; margin:0; text-align:center; font-size:100px; line-height:1.1; font-weight:600; letter-spacing:.1em; padding-left:.1em; }
+    .close-phrase { position:absolute; left:110px; top:650px; width:1700px; margin:0; display:flex; justify-content:center; gap:14px; color:#AAB4C0; font-size:44px; line-height:1.25; font-weight:400; letter-spacing:-.025em; }
+  </style>
+  <div data-hf-id="hf-4xhx" id="root" data-composition-id="close" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-uw06" id="close-ground" class="clip close-ground" data-start="0" data-duration="8" data-track-index="0"></div>
+    <img data-hf-id="hf-kyqx" id="close-orb" class="close-orb" src="assets/orb.png" alt="Friday orb">
+    <h1 data-hf-id="hf-9e6p" id="close-wordmark" class="close-wordmark">FRIDAY</h1>
+    <p data-hf-id="hf-3jt1" class="close-phrase"><span data-hf-id="hf-uqqm" id="close-teach">Teach once.</span><span data-hf-id="hf-y1ks" id="close-team">Help your whole team.</span></p>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    (() => {
+      const tl = gsap.timeline({paused:true});
+      tl.fromTo('#close-orb', {opacity:0, y:18, scale:.94}, {opacity:1, y:0, scale:1, duration:1.35, ease:'power2.out'}, 0);
+      tl.fromTo('#close-wordmark', {opacity:0, y:14}, {opacity:1, y:0, duration:1.1, ease:'power2.out'}, 2.0);
+      tl.fromTo('#close-teach', {opacity:0, y:10}, {opacity:1, y:0, duration:1.0, ease:'power2.out'}, 3.8);
+      tl.fromTo('#close-team', {opacity:0, y:10}, {opacity:1, y:0, duration:1.15, ease:'power2.out'}, 5.1);
+      tl.to('#close-orb', {scale:1.025, duration:5.4, ease:'sine.inOut'}, 1.35);
+      tl.to({}, {duration:1.25}, 6.75);
+      window.__timelines = window.__timelines || {};
+      window.__timelines['close'] = tl;
+    })();
+  </script>
+</template>

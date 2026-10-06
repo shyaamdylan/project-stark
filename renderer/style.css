@@ -1094,6 +1094,9 @@ body.island #caption {
   color: var(--card-muted);
 }
 body.island #rec {
+  max-width: calc(100% - 18px);
+  min-width: 0;
+  box-sizing: border-box;
   align-self: flex-start;
   background: var(--card-fill);
   color: var(--ink);
@@ -1196,3 +1199,17 @@ body.resting:not(.island) #agent-tag {
     animation: none !important;
   }
 }
+
+/* The full assistant follows its safe placement in floating and notch layouts. */
+body:not(.island) :is(#orb, #bubble, #rec, #activity, #status) {
+  translate: var(--island-dx, 0px) var(--island-dy, 0px);
+  transition: translate .25s ease;
+}
+body.island[data-island-edge='left'] #shell { border-radius:0 20px 20px 0; }
+/* Clear a target promptly; use the measured screen rect for click-through. */
+body.island #shell, body.island #orb { transition-delay:0s; }
+@media(prefers-reduced-motion:reduce){body:not(.island) :is(#orb,#bubble,#rec,#activity,#status){transition:none}}
+
+/* Keep recording controls inside the compact island for long skill names. */
+body.island #rec-title { min-width: 0; flex: 1 1 auto; }
+body.island #rec > :not(#rec-title) { flex-shrink: 0; }

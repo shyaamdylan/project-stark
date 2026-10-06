@@ -421,3 +421,68 @@ npm run demo-app   # then open http://localhost:4173
   comes from the prompt cache.
 - Common voice lines are made once and kept on disk.
 
+
+## Business workspace V1 demo
+
+The Friday main window now includes business onboarding, a teaching plan, people,
+collaborative procedure reviews, approved guide versions, and learner training.
+This is a **local dummy backend**, not production authentication or a hosted service.
+No invitation emails are sent. Use the **Demo account** selector to act as another
+member; the workspace service checks that persona's role and procedure assignments.
+
+Run the standalone business demo, without microphone capture or the desktop overlay:
+
+```bash
+npm run demo:workspace
+```
+
+Or use `npm start` to connect the same UI to the actual Friday recording and desktop
+training features. The standalone demo uses a separate `Stark Workspace Demo` data
+folder; the full app keeps its workspace JSON under its own Electron user-data folder.
+Existing local recordings are preserved and can be imported into a business procedure.
+
+### Explore the full flow without an AI key
+
+1. Choose **Try the sample business** in Business setup. This creates a fictional
+   workspace with two experts, one learner, and a procedure awaiting review.
+2. Switch to **Alex Morgan**, the lead expert, using Demo account.
+3. Open the invoice procedure in Skills Hub. Review both expert contributions and
+   resolve the open question. Edit the draft if needed, then approve version 1.
+4. Switch to **Workspace owner**. In Training, create a learning path with the
+   approved procedure and assign it to **Taylor Reed**.
+5. Switch to Taylor and complete the **Demo walkthrough**. This demonstrates the
+   training UI without observing the desktop or assessing real competence.
+6. Switch to Alex to sign off the learner from Training.
+
+A new business can also be created from scratch: company details → website or manual
+company description → editable brief → interview → editable checklist → invitations
+and expert assignments. Without a key, the interview uses clearly labelled guided
+questions and the checklist is written manually. With `ANTHROPIC_API_KEY`, Friday
+summarises public website pages, asks adaptive questions based on the brief and prior
+answers, proposes checklist items, and compares expert contributions. These live AI
+features use the configured provider; tests substitute deterministic responses.
+
+Website ingestion reads the supplied public page and up to three relevant same-site
+pages, records the source URLs, limits response size/time, and excludes local/private
+network addresses. Website descriptions are groundwork, not approved procedures.
+
+Approval requires a guide, reviewed contributions, and resolved questions. Every
+approved version is an immutable snapshot. A learner's attempt stays pinned to the
+version it started with, even if experts publish an update. Experts refine a draft
+without changing an active lesson. Live recordings attach as contributions to the
+selected procedure; desktop lessons report completion back to the workspace.
+
+Validate the backend and existing app code with `npm test`. Run the actual Electron
+UI against temporary demo data using `npm run test:workspace-ui`; this covers onboarding,
+invitations, multi-expert review, conflict resolution, approval, learning-path assignment,
+learner completion, and sign-off without paid AI or voice calls.
+
+### Existing test skills / developer library
+
+Use **Local recordings** in the main window's sidebar to access the original local
+Skills Hub, including Start training, Spot me, and Run with Jarvis. These recordings
+remain in `~/Library/Application Support/Project Stark/workmaps`; workspace onboarding
+does not move or delete them. The standalone business demo previews that same library
+and allows viewing guides or revealing files; use the full app (`npm start`) for live
+recording/training and destructive library actions. To open the standalone preview
+directly on this library, run `npm run demo:workspace -- --recordings`.

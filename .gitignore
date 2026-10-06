@@ -4,3 +4,8 @@ out/
 .env
 .DS_Store
 *.log
+
+# HyperFrames caches
+.thumbnails/
+.waveform-cache/
+.hyperframes/

@@ -1,5 +1,7 @@
+const hubAPI = window.hub || window.parent.hub;
 const $ = (id) => document.getElementById(id);
 let skills = [];
+let desktopAvailable = true;
 let current = null;
 let filter = 'all';
 const date = (ms) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -41,14 +43,14 @@ function select(id) {
   $('status').textContent = state(current);
   $('status').className = 'status' + (current.page && current.confirmed ? ' confirmed' : '');
   $('meta').textContent = [current.page ? `${current.steps} steps` : null, current.judgments ? `${current.judgments} decision ${current.judgments === 1 ? 'point' : 'points'}` : null, `Recorded ${date(current.createdAt)}`].filter(Boolean).join(' · ');
-  $('learn').disabled = !current.page; $('spot').disabled = !current.page; $('export').disabled = !current.page; $('open').disabled = !current.page; $('run').disabled = !current.page;
+  $('learn').disabled = !current.page || !desktopAvailable; $('spot').disabled = !current.page || !desktopAvailable; $('export').disabled = !current.page || !desktopAvailable; $('open').disabled = !current.page; $('run').disabled = !current.page || !desktopAvailable;
   $('unfinished').classList.toggle('hidden', Boolean(current.page));
   $('frame').classList.toggle('hidden', !current.page);
   if (previous !== current.id || $('frame').getAttribute('src') !== current.page) $('frame').src = current.page || 'about:blank';
 }
 async function load(selectId) {
   try {
-    skills = await window.hub.list();
+    skills = await hubAPI.list();
     $('load-error').classList.add('hidden');
     $('all-count').textContent = skills.length;
     $('confirmed-count').textContent = skills.filter((s) => s.confirmed && s.page).length;
@@ -70,22 +72,22 @@ document.querySelectorAll('[data-filter]').forEach((button) => button.addEventLi
   document.querySelectorAll('[data-filter]').forEach((b) => { b.classList.toggle('active', b === button); b.setAttribute('aria-pressed', String(b === button)); });
   updateCollection();
 }));
-$('teach').addEventListener('click', () => window.hub.teach());
-$('empty-teach').addEventListener('click', () => window.hub.teach());
+$('teach').addEventListener('click', () => hubAPI.teach());
+$('empty-teach').addEventListener('click', () => hubAPI.teach());
 $('retry').addEventListener('click', () => load());
-$('open').addEventListener('click', () => { if (current) window.hub.openExternal(current.id); document.querySelector('.more').open = false; });
-$('learn').addEventListener('click', () => current?.page && window.hub.learn(current.id));
-$('spot').addEventListener('click', () => current?.page && window.hub.spot(current.id));
+$('open').addEventListener('click', () => { if (current) hubAPI.openExternal(current.id); document.querySelector('.more').open = false; });
+$('learn').addEventListener('click', () => current?.page && hubAPI.learn(current.id));
+$('spot').addEventListener('click', () => current?.page && hubAPI.spot(current.id));
 $('export').addEventListener('click', async () => {
   if (!current?.page) return;
-  try { await window.hub.exportForAgents(current.id); document.querySelector('.more').open = false; }
+  try { await hubAPI.exportForAgents(current.id); document.querySelector('.more').open = false; }
   catch { alert('This procedure couldn’t be exported. Try again.'); }
 });
-$('run').addEventListener('click', () => current?.page && window.hub.run(current.id));
-$('reveal').addEventListener('click', () => { if (current) window.hub.reveal(current.id); document.querySelector('.more').open = false; });
+$('run').addEventListener('click', () => current?.page && hubAPI.run(current.id));
+$('reveal').addEventListener('click', () => { if (current) hubAPI.reveal(current.id); document.querySelector('.more').open = false; });
 $('delete').addEventListener('click', async () => {
   if (!current || !confirm(`Move “${current.title}” to the Trash? You can restore its folder from the Mac's Trash.`)) return;
-  try { await window.hub.remove(current.id); current = null; await load(); }
+  try { await hubAPI.remove(current.id); current = null; await load(); }
   catch { alert('This procedure couldn’t be moved to the Trash. Try again.'); }
 });
 document.addEventListener('keydown', (e) => {
@@ -93,5 +95,19 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') document.querySelector('.more').open = false;
 });
 document.addEventListener('click', (e) => { if (!e.target.closest('.more')) document.querySelector('.more').open = false; });
-window.hub.onChanged((id) => load(id));
-load();
+hubAPI.onChanged((id) => load(id));
+(async () => {
+  try { if (hubAPI.info) desktopAvailable = (await hubAPI.info()).desktopAvailable; } catch {}
+  if (!desktopAvailable) {
+    for (const id of ['teach','empty-teach','learn','spot','run','delete','export']) { $(id).disabled = true; $(id).title = 'Available in the full Project Stark app (npm start).'; }
+    document.querySelector('.local-note').textContent = 'Preview · use npm start for training';
+  }
+  await load();
+})();
+
+// Match the main app's appearance when the library is embedded there.
+if (window.parent !== window) {
+  const syncTheme = () => { document.documentElement.dataset.theme = window.parent.document.documentElement.dataset.theme; };
+  syncTheme();
+  new MutationObserver(syncTheme).observe(window.parent.document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+}

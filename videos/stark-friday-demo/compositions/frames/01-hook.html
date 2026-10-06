@@ -1,0 +1,34 @@
+<template>
+  <div data-hf-id="hf-ktv8" id="root" data-composition-id="hook" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-7i2z" class="clip" id="hook-ground" data-start="0" data-duration="8" data-track-index="0"></div>
+    <div data-hf-id="hf-8b76" id="hook-copy">
+      <div data-hf-id="hf-9cjj" id="hook-eyebrow">FRIDAY</div>
+      <div data-hf-id="hf-f9ri" id="hook-line-one">Your expertise.</div>
+      <div data-hf-id="hf-0yc6" id="hook-line-two">Her instincts.</div>
+      <div data-hf-id="hf-9zj0" id="hook-meet">Meet Friday. Your AI training companion.</div>
+    </div>
+    <img data-hf-id="hf-htcj" id="hook-orb" src="assets/orb.png" alt="Friday orb">
+  </div>
+  <style>
+    #root { position:relative; width:100%; height:100%; overflow:hidden; color:#F5F5F7; font-family:system-ui,sans-serif; }
+    [id="hook-ground"] { position:absolute; inset:0; background:#080B10; }
+    [id="hook-copy"] { position:absolute; left:150px; top:340px; width:1050px; }
+    [id="hook-eyebrow"] { position:absolute; top:-90px; font-size:20px; font-weight:400; letter-spacing:.18em; color:#AAB4C0; }
+    [id="hook-line-one"], [id="hook-line-two"] { font-size:96px; line-height:1.12; letter-spacing:-.04em; font-weight:600; }
+    [id="hook-line-two"] { margin-top:10px; }
+    [id="hook-meet"] { margin-top:54px; font-size:36px; font-weight:400; letter-spacing:-.02em; color:#AAB4C0; }
+    [id="hook-orb"] { position:absolute; left:1280px; top:340px; width:360px; height:360px; object-fit:contain; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({paused:true});
+    tl.fromTo('[id="hook-orb"]', {opacity:0,scale:.94}, {opacity:1,scale:1,duration:1.6,ease:'power2.out'}, 0);
+    tl.fromTo('[id="hook-eyebrow"]', {opacity:0,y:8}, {opacity:1,y:0,duration:1,ease:'power2.out'}, .15);
+    tl.fromTo('[id="hook-line-one"]', {opacity:0,y:18}, {opacity:1,y:0,duration:1.2,ease:'power2.out'}, .35);
+    tl.fromTo('[id="hook-line-two"]', {opacity:0,y:18}, {opacity:1,y:0,duration:1.3,ease:'power2.out'}, 2.5);
+    tl.fromTo('[id="hook-meet"]', {opacity:0,y:10}, {opacity:1,y:0,duration:1.15,ease:'power2.out'}, 5.1);
+    tl.to('[id="hook-orb"]', {scale:1.035,duration:6.4,ease:'none'}, 1.6);
+    window.__timelines['hook'] = tl;
+  </script>
+</template>

@@ -1,0 +1,146 @@
+{
+  "provider": "elevenlabs",
+  "voice": "Jessica - Playful, Bright, Warm",
+  "voices": [
+    {
+      "id": "hook",
+      "at": 0.8,
+      "text": "What if your best expert could be beside everyone on your team?",
+      "path": "assets/audio/hook.mp3",
+      "duration": 3.157914,
+      "role": "Friday / narrator",
+      "voice": "Jessica - Playful, Bright, Warm"
+    },
+    {
+      "id": "expert-intro",
+      "at": 4.2,
+      "role": "expert",
+      "voice": "Chris - Charming, Down-to-Earth",
+      "voiceId": "iP95p4xoKVk53GoZ742B",
+      "text": "Hey Friday, here’s how to review and code a machinery invoice.",
+      "path": "assets/audio/expert-intro-v2.mp3",
+      "duration": 3.204354
+    },
+    {
+      "id": "teach",
+      "at": 9,
+      "text": "Meet Friday. Show her how you work. Explain what matters, and why.",
+      "path": "assets/audio/teach.mp3",
+      "duration": 4.318912,
+      "role": "Friday / narrator",
+      "voice": "Jessica - Playful, Bright, Warm"
+    },
+    {
+      "id": "expert",
+      "at": 16,
+      "role": "expert",
+      "voice": "Chris - Charming, Down-to-Earth",
+      "voiceId": "iP95p4xoKVk53GoZ742B",
+      "text": "New equipment over five thousand euros goes to capital expenditure. Always add the asset number before approval.",
+      "path": "assets/audio/expert-v2.mp3",
+      "duration": 5.897868
+    },
+    {
+      "id": "skill",
+      "at": 24,
+      "text": "Friday turns that experience into a skill your team can learn.",
+      "path": "assets/audio/skill.mp3",
+      "duration": 3.390113,
+      "role": "Friday / narrator",
+      "voice": "Jessica - Playful, Bright, Warm"
+    },
+    {
+      "id": "learner-question",
+      "at": 28.1,
+      "voiceId": "bIHbv24MWmeRgasZH58o",
+      "voice": "Will - Relaxed Optimist",
+      "role": "learner",
+      "text": "Friday, can you walk me through this?",
+      "model": "eleven_v4",
+      "path": "assets/audio/learner-question-v5.mp3",
+      "duration": 2.4
+    },
+    {
+      "id": "learn",
+      "at": 31,
+      "text": "Step one. Check the line items, then code new equipment to capital expenditure.",
+      "path": "assets/audio/learn-v4.mp3",
+      "duration": 5.24771,
+      "role": "Friday",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "kind": "Scripted summary of the recorded guidance"
+    },
+    {
+      "id": "friday-guide",
+      "at": 38,
+      "text": "Step two. Enter the asset number.",
+      "path": "assets/audio/friday-guide-v4.mp3",
+      "duration": 2.368435,
+      "role": "Friday",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "kind": "Scripted summary of the recorded guidance"
+    },
+    {
+      "id": "friday-approve",
+      "at": 41.8,
+      "text": "Step three. Send for approval.",
+      "path": "assets/audio/friday-approve-v4.mp3",
+      "duration": 2.275556,
+      "role": "Friday",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "kind": "Scripted summary of the recorded guidance"
+    },
+    {
+      "id": "friday-done",
+      "at": 44.2,
+      "text": "That's it, you've done it.",
+      "path": "assets/audio/friday-done.mp3",
+      "duration": 1.253878,
+      "kind": "actual Friday response excerpt",
+      "role": "Friday / narrator",
+      "voice": "Jessica - Playful, Bright, Warm"
+    },
+    {
+      "id": "spot",
+      "at": 46.8,
+      "role": "Friday / narrator",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "voiceId": "cgSgspJ2msm6clMCkdW9",
+      "text": "As they grow more confident, Friday gives them room to work, and speaks up when something needs a second look.",
+      "path": "assets/audio/spot-v2.mp3",
+      "duration": 5.526349
+    },
+    {
+      "id": "learner-spot",
+      "at": 54.2,
+      "voiceId": "bIHbv24MWmeRgasZH58o",
+      "voice": "Will - Relaxed Optimist",
+      "role": "learner",
+      "text": "Friday, spot me.",
+      "model": "eleven_v4",
+      "path": "assets/audio/learner-spot-v5.mp3",
+      "duration": 1.6
+    },
+    {
+      "id": "friday-spot",
+      "at": 55.8,
+      "text": "Check this: this is new equipment, not a repair. Change the cost center to 0400, capital expenditure.",
+      "path": "assets/audio/friday-spot-v4.mp3",
+      "duration": 7.987664,
+      "role": "Friday",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "kind": "Scripted summary of the recorded guidance"
+    },
+    {
+      "id": "close",
+      "at": 71,
+      "voiceId": "cgSgspJ2msm6clMCkdW9",
+      "voice": "Jessica - Playful, Bright, Warm",
+      "role": "Friday / narrator",
+      "text": "Your expertise. Shared across your team. Meet Friday.",
+      "model": "eleven_multilingual_v2",
+      "path": "assets/audio/close-v5.mp3",
+      "duration": 4.133152
+    }
+  ]
+}

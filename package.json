@@ -10,7 +10,10 @@
     "test": "node --test test/*.test.js",
     "dist": "electron-builder --mac",
     "text": "electron . --text",
-    "demo-app": "node demo/server.js"
+    "demo-app": "node demo/server.js",
+    "test:workspace-ui": "electron scripts/workspace-smoke.cjs",
+    "demo:workspace": "electron demo/workspace.js",
+    "test:overlay-ui": "electron scripts/overlay-smoke.cjs"
   },
   "devDependencies": {
     "electron": "^44.5.1",
