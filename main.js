@@ -60,6 +60,7 @@ const { pathToFileURL } = require('url');
 const { findBest, normalize } = require('./src/matcher');
 const voice = require('./src/voice');
 const { findNotches, overlayLayout } = require('./src/notch');
+const { checkOtherAudio } = require('./src/macaudio');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
 
@@ -168,6 +169,23 @@ function createWindow() {
   });
 
   startCursorTracking();
+  watchMacAudio();
+}
+
+// Tell the orb when another app is playing sound, so a video talking isn't
+// taken for you (see src/macaudio.js).
+let macAudioTimer = null;
+let macAudio = false;
+function watchMacAudio() {
+  clearInterval(macAudioTimer);
+  macAudioTimer = setInterval(async () => {
+    if (!win || win.isDestroyed()) return;
+    const playing = await checkOtherAudio(app.getAppMetrics().map((m) => m.pid).concat(process.pid));
+    if (playing === macAudio) return;
+    macAudio = playing;
+    console.log(playing ? '[mic] another app is playing sound: only speech that starts with a name counts' : '[mic] the Mac is quiet again');
+    win.webContents.send('mac-audio', { playing });
+  }, 2000);
 }
 
 // Eyes follow the cursor everywhere, not just over our window, so poll it.

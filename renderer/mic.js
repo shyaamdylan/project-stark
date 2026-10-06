@@ -33,6 +33,7 @@ const Mic = (() => {
   let preroll = [];
   let utterance = 0; // which utterance this is, so onHead and onUtterance can be matched
   let headSent = false;
+  let echoReported = null; // which echo cancellation we got, logged once
   const HEAD_FRAMES = Math.ceil(HEAD_MS / FRAME_MS);
 
   function rms(buf) {
@@ -131,13 +132,26 @@ const Mic = (() => {
   async function start(o) {
     if (ctx) return true;
     opts = { silenceMs: 1600, ...o };
+    // Only you should count as speech, not the Mac's own sound (a video, music,
+    // a call). echoCancellation "all" cancels everything the Mac plays, using
+    // macOS's own voice processing (as FaceTime does); plain echo cancellation
+    // only removes what this app plays (the buddy's voice). Ask for "all" and
+    // fall back where it isn't supported.
+    const base = { noiseSuppression: true, autoGainControl: true, channelCount: 1 };
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-      });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { ...base, echoCancellation: { exact: 'all' } } });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { ...base, echoCancellation: true } });
+      }
     } catch (err) {
       console.error('[mic]', err);
       return false;
+    }
+    const ec = stream.getAudioTracks()[0] && stream.getAudioTracks()[0].getSettings().echoCancellation;
+    if (ec !== echoReported) {
+      echoReported = ec;
+      console.log(ec === 'all' ? "[mic] ignoring the Mac's own audio (system echo cancellation on)" : "[mic] system echo cancellation isn't available here: sound playing on the Mac can be heard as speech");
     }
     ctx = new AudioContext({ sampleRate: RATE });
     const src = ctx.createMediaStreamSource(stream);
@@ -159,5 +173,6 @@ const Mic = (() => {
     preroll = [];
   }
 
-  return { start, stop, isOn: () => Boolean(ctx), isSpeaking: () => speaking };
+  // cancelsMacAudio: the Mac's own sound is already removed from what we hear.
+  return { start, stop, isOn: () => Boolean(ctx), isSpeaking: () => speaking, cancelsMacAudio: () => echoReported === 'all' };
 })();

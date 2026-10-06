@@ -193,6 +193,10 @@ top centre on every screen.
 - **It knows when you're not talking to it.** Speech in a language you don't use with it
   (`SPEECH_LANGUAGES`) is ignored, and "thanks", "bye" or "well done" ends the conversation
   instead of being taken as a request. A follow-up without its name works for about 12 seconds.
+- **The Mac's own sound isn't you.** The mic asks macOS to cancel everything the Mac plays (the
+  echo cancellation FaceTime uses), so a video or song isn't heard as speech; the terminal says at
+  startup whether that's available. As a backstop, while another app is playing sound, only speech
+  that starts with "Hey Friday" or "Hey Jarvis" counts as talking to them.
 - **Nothing is sent without a yes.** Pressing Return in a message or form field counts as
   sending, so Jarvis shows exactly what will go ("Ready to send "See you at 6" from "Message".
   Send it?") first. Search and address bars are exempt.

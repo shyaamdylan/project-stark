@@ -58,6 +58,7 @@ const state = {
   pointerStyle: 'mixed', // 'mixed', 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
   pointerMode: null, // what's out on screen now: 'ring' or 'cursor'
   wakingUntil: 0, // heard its name mid-sentence: look awake until the request arrives
+  macAudio: false, // another app is playing sound the mic can hear
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
   voice: 'system',
@@ -1292,7 +1293,14 @@ async function heard(wav, clip = {}) {
     return;
   }
   // Background listening: only act when it starts with the wake word, or
-  // straight after an exchange (a follow-up needs no wake word).
+  // straight after an exchange (a follow-up needs no wake word). While another
+  // app is playing sound the mic can hear, a follow-up needs the name too:
+  // otherwise a video talking would count as you.
+  const otherSound = state.macAudio && !Mic.cancelsMacAudio();
+  if (!woke && convoOpen() && hasWords(text) && otherSound) {
+    console.log('[mic] ignored (no name, and another app is playing sound)');
+    return;
+  }
   if ((state.wakeEnabled && woke) || (convoOpen() && hasWords(text))) {
     const rest = text;
     if (isClosing(rest)) {
@@ -1556,6 +1564,9 @@ window.buddy.on('config', (c) => {
   setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });
 });
 window.buddy.on('wake', setWake);
+window.buddy.on('mac-audio', ({ playing }) => {
+  state.macAudio = Boolean(playing);
+});
 window.buddy.on('agent', ({ agent }) => applyAgent(agent));
 
 // Safety net: an unexpected error is logged, and the buddy stays usable.
