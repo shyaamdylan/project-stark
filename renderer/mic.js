@@ -5,6 +5,9 @@
 // you've been quiet for `silenceMs` it hands the whole utterance to
 // onUtterance as a 16 kHz mono WAV. The pause allowed is generous on purpose,
 // so you can speak slowly and think between phrases.
+//
+// onHead gets the opening second and a half while you're still talking, so a
+// wake word can be spotted (and the orb wake up) without waiting for the end.
 
 const Mic = (() => {
   const RATE = 16000;
@@ -28,6 +31,9 @@ const Mic = (() => {
   let speechMs = 0;
   let chunks = [];
   let preroll = [];
+  let utterance = 0; // which utterance this is, so onHead and onUtterance can be matched
+  let headSent = false;
+  const HEAD_FRAMES = Math.ceil(HEAD_MS / FRAME_MS);
 
   function rms(buf) {
     let s = 0;
@@ -72,8 +78,9 @@ const Mic = (() => {
     if (ms < min) return;
     // The opening second and a half, for a cheap "was that for me?" check:
     // the wake word always comes first, so there's no need to send the rest.
-    const headFrames = frames.slice(0, Math.ceil(HEAD_MS / FRAME_MS));
+    const headFrames = frames.slice(0, HEAD_FRAMES);
     opts.onUtterance(encodeWav(frames), {
+      id: utterance,
       head: () => encodeWav(headFrames),
       longerThanHead: frames.length > headFrames.length,
     });
@@ -99,12 +106,18 @@ const Mic = (() => {
         preroll = [];
         speechMs = loudRun * FRAME_MS;
         quietMs = 0;
+        utterance++;
+        headSent = false;
         if (opts.onStart) opts.onStart();
       }
       return;
     }
 
     chunks.push(buf);
+    if (!headSent && chunks.length >= HEAD_FRAMES && opts.onHead) {
+      headSent = true;
+      opts.onHead(encodeWav(chunks.slice(0, HEAD_FRAMES)), utterance);
+    }
     if (loud) {
       speechMs += FRAME_MS;
       quietMs = 0;

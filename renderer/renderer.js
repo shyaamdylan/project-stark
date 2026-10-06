@@ -57,6 +57,7 @@ const state = {
   pointerAt: null, // where the cursor is pointing, while it's out of the orb
   pointerStyle: 'mixed', // 'mixed', 'highlight' (a ring) or 'spark' (a cursor flies out of the orb)
   pointerMode: null, // what's out on screen now: 'ring' or 'cursor'
+  wakingUntil: 0, // heard its name mid-sentence: look awake until the request arrives
   exit: null, // where the droplet left the orb, so it can come back the same way
   interactive: false,
   voice: 'system',
@@ -1185,17 +1186,53 @@ function openConvo(ms = CONVO_MS) {
 }
 
 // In a conversation: lesson, task, being taught, a question open, or just talked.
-const awake = () => Boolean(state.guiding || state.executing || state.teaching || state.answering || state.listening || state.promptOpen || convoOpen());
+const awake = () => Boolean(state.guiding || state.executing || state.teaching || state.answering || state.listening || state.promptOpen || convoOpen() || state.wakingUntil > Date.now());
+
+// ---------- waking up the moment it hears its name ----------
+//
+// While dormant, the opening second and a half of what you say is checked for
+// "Hey Friday" while you're still talking. The moment it's there the orb wakes
+// (grows, brightens, "Hearing you"), so you know it's listening before you've
+// finished the sentence.
+const WAKING_MS = 15000;
+let earlyHead = null; // { id, text: Promise<string> } for the utterance in progress
+const isActive = () => Boolean(state.listening || state.answering || state.teaching || state.executing || state.guiding || convoOpen());
+
+function onHead(wav, id) {
+  if (isActive() || !state.wakeEnabled) return;
+  const text = window.buddy.transcribe(wav).catch(() => '');
+  earlyHead = { id, text };
+  text.then((t) => {
+    const w = splitWake(t);
+    if (!earlyHead || earlyHead.id !== id || !w.woke) return;
+    if (w.agent && w.agent !== state.agent) applyAgent(w.agent);
+    wakeUp();
+  });
+}
+
+function wakeUp() {
+  if (state.wakingUntil > Date.now()) return;
+  state.wakingUntil = Date.now() + WAKING_MS;
+  flare();
+  setTimeout(updateMic, 0);
+}
 
 async function heard(wav, clip = {}) {
-  const active = state.listening || state.answering || state.teaching || state.executing || state.guiding || convoOpen();
+  const active = isActive();
   let raw = '';
   try {
     if (!active && clip.head) {
       // Only listening for the wake word: transcribe just the opening second
-      // and a half. Speech that isn't for the buddy costs that little and no more.
-      const opening = await window.buddy.transcribe(clip.head());
-      if (!splitWake(opening).woke) return;
+      // and a half (already done mid-speech by onHead, if it was long enough).
+      // Speech that isn't for the buddy costs that little and no more.
+      const early = earlyHead && earlyHead.id === clip.id ? earlyHead.text : null;
+      earlyHead = null;
+      const opening = await (early || window.buddy.transcribe(clip.head()));
+      if (!splitWake(opening).woke) {
+        state.wakingUntil = 0;
+        return;
+      }
+      wakeUp();
       raw = clip.longerThanHead ? await window.buddy.transcribe(wav) : opening;
     } else {
       raw = await window.buddy.transcribe(wav);
@@ -1203,6 +1240,8 @@ async function heard(wav, clip = {}) {
   } catch {
     return;
   }
+  // The wake-up look has done its job: from here the request itself takes over.
+  state.wakingUntil = 0;
   console.log(`[mic] heard: ${JSON.stringify(raw)}${state.listening ? ` (listening: ${state.listening})` : state.answering ? ' (answering)' : state.teaching ? ' (teaching)' : state.executing ? ' (jarvis working)' : ''}`);
   if (!raw) return;
   // "Stop" while Jarvis works stops him, even mid-question. Checked before the
@@ -1304,6 +1343,7 @@ function updateMic() {
         state.micLevel = v;
       },
       onUtterance: heard,
+      onHead,
     }).then((ok) => {
       console.log(ok ? '[mic] listening' : '[mic] could not start');
       if (!ok) say("I can't hear you. Allow microphone access for me in System Settings.", { mood: 'worried' });

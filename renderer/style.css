@@ -925,8 +925,9 @@ body.island #buddy.dormant {
 body.island #shell {
   display: block;
   position: absolute;
-  right: 0;
-  bottom: 0;
+  /* A hair past the edges, so a fractional display scale never leaves a sliver. */
+  right: -2px;
+  bottom: -2px;
   z-index: 1;
   width: var(--nub);
   height: var(--nub);
@@ -943,8 +944,8 @@ body.island #shell-in {
   flex-direction: column;
   gap: 10px;
   position: absolute;
-  right: 0;
-  bottom: 0;
+  right: 2px;
+  bottom: 2px;
   width: max-content;
   max-width: 400px;
   box-sizing: border-box;
@@ -1040,7 +1041,15 @@ body.island #orb {
   right: 11px;
   bottom: 11px;
   z-index: 2;
-  transition: width 0.35s ease, height 0.35s ease, filter 0.6s ease;
+  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.6s ease;
+}
+/* Waking: the dim dot swells into the full orb. */
+body.island #body {
+  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), margin 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+body.island #goo-glow,
+body.island #plasma {
+  transition: opacity 0.35s ease;
 }
 body.island #reactor {
   inset: -5px;

@@ -174,6 +174,8 @@ The orb lives in a black island flush in the screen's bottom-right corner, so it
 the MacBook's frame. Resting, it's a small nub with a dim orb. When Friday or Jarvis is active it
 grows up and to the left to hold everything: what they're doing (Listening, Thinking, Speaking),
 what they say, their questions and Jarvis's task panel. When they're done it shrinks back.
+It wakes the moment it hears its name: "Hey Friday" is spotted in the first second and a half of
+what you say, while you're still talking, and the dim dot swells into the orb straight away.
 `ORB_PLACE=float` brings back the orb floating just inside the corner.
 
 ### In the notch

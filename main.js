@@ -75,6 +75,13 @@ let notches = []; // MacBook notches on connected screens (src/notch.js)
 function placeOverlay(display) {
   const layout = overlayLayout(display, notches, cfg.orbPlace);
   win.setBounds(layout.area);
+  // The island only looks like part of the frame if the overlay really reaches
+  // the screen's edges; say so if macOS put it somewhere else.
+  const got = win.getBounds();
+  const want = layout.area;
+  if (['x', 'y', 'width', 'height'].some((k) => Math.abs(got[k] - want[k]) > 1)) {
+    console.log(`[layout] asked for the overlay at ${want.x},${want.y} ${want.width}×${want.height} but macOS put it at ${got.x},${got.y} ${got.width}×${got.height}`);
+  }
   win.webContents.send('layout', { mode: layout.mode, notch: layout.notch });
   return layout;
 }
@@ -85,6 +92,9 @@ function createWindow() {
     ...overlayLayout(display, notches, cfg.orbPlace).area,
     // macOS keeps windows below the menu bar unless told otherwise; in the notch the orb sits in it.
     enableLargerThanScreen: true,
+    // macOS rounds a frameless window's corners, which would cut the corner
+    // island off short of the screen's real corner.
+    roundedCorners: false,
     transparent: true,
     frame: false,
     hasShadow: false,
