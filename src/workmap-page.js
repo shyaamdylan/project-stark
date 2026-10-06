@@ -1,3 +1,5 @@
+const workmapStyle = require('fs').readFileSync(require('path').join(__dirname, 'workmap-style.css'), 'utf8');
+
 // Renders a Work Map as a self-contained HTML page that sits next to its
 // screenshots (frames/*.jpg). All content is inserted with textContent from the
 // embedded JSON, so nothing from the session is ever parsed as HTML.
@@ -107,11 +109,12 @@ section.extra { max-width: 1240px; margin: 0 auto; padding: 0 24px 64px; display
 .qa .q { font-weight: 600; }
 .qa .a { color: var(--muted); margin-top: 2px; }
 .qa .when { font-size: 12px; color: var(--muted); }
+${workmapStyle}
 </style>
 </head>
 <body>
 <header>
-  <div class="eyebrow">Work Map</div>
+  <div class="eyebrow">Training guide</div>
   <h1 id="title"></h1>
   <p class="summary" id="summary"></p>
   <div class="chips" id="chips"></div>
@@ -127,6 +130,7 @@ section.extra { max-width: 1240px; margin: 0 auto; padding: 0 24px 64px; display
 </section>
 <script type="application/json" id="data">${json}</script>
 <script>
+if (window.self !== window.top) document.documentElement.classList.add('embedded');
 const D = JSON.parse(document.getElementById('data').textContent);
 const M = D.map;
 const ev = new Map(D.events.map((e) => [e.id, e]));
@@ -138,7 +142,7 @@ const KIND = { limit: 'Limit', exception: 'Exception', stop_and_ask: 'Stop and a
 
 $('title').textContent = M.title || D.title;
 $('summary').textContent = M.summary;
-document.title = (M.title || D.title) + ' · Work Map';
+document.title = (M.title || D.title) + ' · Training guide';
 const judg = M.steps.filter((s) => s.is_judgment).length;
 const guards = M.steps.reduce((n, s) => n + s.guardrails.length, 0);
 const last = D.events.length ? D.events[D.events.length - 1].t : 0;

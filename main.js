@@ -1896,6 +1896,13 @@ function listSkills() {
       const map = readJson(path.join(dir, 'workmap.json'));
       const sess = readJson(path.join(dir, 'session.json'));
       const page = path.join(dir, 'index.html');
+      // Refresh presentation for existing recordings without changing their learned data.
+      if (map && sess && Array.isArray(sess.events) && Array.isArray(sess.qas)) {
+        try {
+          const html = renderWorkMap({ map, session: sess });
+          if (!fs.existsSync(page) || fs.readFileSync(page, 'utf8') !== html) fs.writeFileSync(page, html);
+        } catch (err) { console.warn('[hub] Could not refresh training guide:', err.message); }
+      }
       const steps = map ? map.steps : [];
       return {
         id: d.name,
@@ -1931,7 +1938,7 @@ function openHub(selectId) {
     height: 780,
     minWidth: 820,
     minHeight: 520,
-    title: 'Skills',
+    title: 'Skills Hub',
     // A Mac app window: traffic lights inset over a translucent sidebar.
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 18, y: 18 },

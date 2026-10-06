@@ -1,0 +1,219 @@
+/* Shared visual language for standalone and embedded training guides. */
+:root {
+  color-scheme:light dark;
+  --bg:#fff;
+  --panel:#fff;
+  --ink:#222326;
+  --muted:#65666c;
+  --line:#dedee3;
+  --accent:#245dcc;
+  --accent-soft:#e8eefb;
+  --shadow:none;
+  --judge:#65558a;
+  --judge-soft:#f2eff7
+}
+@media(prefers-color-scheme:dark) {
+  :root {
+    --bg:#222225;
+    --panel:#29292d;
+    --ink:#f1f1f3;
+    --muted:#b0b0b9;
+    --line:#424247;
+    --accent:#a7c6ff;
+    --accent-soft:#303f59;
+    --judge:#c0b2e1;
+    --judge-soft:#34303e;
+    --shadow:none
+  }
+}
+body {
+  -webkit-font-smoothing:antialiased;
+  font-size:14px
+}
+header {
+  padding:28px 28px 20px;
+  max-width:1080px
+}
+.eyebrow {
+  font-size:11px;
+  color:var(--muted);
+  letter-spacing:.08em
+}
+.eyebrow::before {
+  display:none
+}
+h1 {
+  font-size:28px;
+  font-weight:600;
+  letter-spacing:-.6px
+}
+.summary {
+  font-size:14px;
+  line-height:1.65
+}
+.chips {
+  gap:6px;
+  margin-top:14px
+}
+.chip {
+  font-size:11px;
+  border-radius:5px;
+  padding:3px 7px;
+  background:var(--bg)
+}
+main {
+  max-width:1080px;
+  grid-template-columns:220px minmax(0,1fr);
+  gap:20px;
+  padding:8px 28px 40px
+}
+.prereq {
+  max-width:1080px;
+  padding:0 28px 20px;
+  gap:12px
+}
+.prereq .card {
+  padding:16px
+}
+.card,.detail {
+  border-radius:10px;
+  box-shadow:none
+}
+.step-btn {
+  border-radius:7px;
+  background:transparent;
+  border-color:transparent;
+  padding:10px;
+  grid-template-columns:24px 1fr;
+  gap:8px
+}
+.step-btn[aria-current="true"] {
+  background:var(--accent-soft);
+  border-color:var(--accent-soft);
+  box-shadow:none
+}
+.step-btn .num {
+  width:24px;
+  height:24px;
+  border-radius:6px;
+  font-size:11px
+}
+.step-title {
+  font-size:12px
+}
+.step-meta {
+  font-size:11px
+}
+.tag {
+  border-radius:4px;
+  font-size:10px
+}
+.body {
+  padding:20px
+}
+.body h2 {
+  font-size:20px;
+  line-height:1.35
+}
+.action {
+  line-height:1.65;
+  color:var(--ink)
+}
+.label {
+  font-size:10px
+}
+.decision,blockquote {
+  font-size:14px;
+  line-height:1.6
+}
+.rule {
+  border-style:solid;
+  font-weight:500;
+  border-radius:7px
+}
+.guard {
+  border-radius:7px;
+  grid-template-columns:1fr
+}
+.guard .kind {
+  width:fit-content;
+  background:transparent;
+  padding:0
+}
+.nav {
+  padding:0 20px 20px
+}
+.nav button {
+  border-radius:6px;
+  font-size:12px
+}
+.extra {
+  max-width:1080px!important;
+  gap:16px!important;
+  padding:0 28px 40px!important
+}
+.card h3 {
+  font-size:14px
+}
+.no-frame {
+  padding:24px;
+  font-size:12px
+}
+.moment .ring {
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px #245dcc33
+}
+.moment .time {
+  border-radius:5px
+}
+:focus-visible {
+  outline:3px solid var(--accent);
+  outline-offset:2px
+}
+@media(max-width:860px) {
+  main {
+    grid-template-columns:1fr
+  }
+  .timeline {
+    position:static;
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:4px
+  }
+  .timeline li {
+    margin:0
+  }
+  .prereq {
+    grid-template-columns:1fr
+  }
+  .extra {
+    grid-template-columns:1fr!important
+  }
+}
+@media(max-width:440px) {
+  main {
+    padding:8px 20px 28px
+  }
+  .timeline {
+    grid-template-columns:1fr
+  }
+  .prereq {
+    padding:0 20px 16px
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  * {
+    transition:none!important;
+    scroll-behavior:auto!important
+  }
+}
+/* The host supplies the procedure title and metadata. */
+html.embedded header {
+  padding:0 28px 18px
+}
+html.embedded header h1,html.embedded .eyebrow,html.embedded .chips {
+  display:none
+}
+html.embedded main {
+  padding-top:0
+}
