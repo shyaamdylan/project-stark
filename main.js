@@ -208,11 +208,11 @@ function startCursorTracking() {
   setInterval(refreshDock, 15000);
 }
 
-// ---------- the corner island keeps out of the way (src/avoid.js) ----------
+// ---------- the corner island keeps clear of the Dock (src/avoid.js) ----------
 //
-// Of the Dock when it's showing over the corner, and of the cursor when it
-// comes for something underneath. The renderer reports the island's size; this
-// works out how far to slide it and tells the renderer, which animates it.
+// The renderer reports the island's size; this works out whether the Dock is
+// showing over the corner and how far to slide it, and tells the renderer,
+// which animates it. Nothing else moves it.
 let islandBox = null; // { w, h, interactive } from the renderer
 let avoidState = {};
 let islandOffset = { x: 0, y: 0 };
@@ -228,7 +228,7 @@ function keepIslandClear(p, b) {
   avoidState = r.state;
   if (r.offset.x === islandOffset.x && r.offset.y === islandOffset.y) return;
   islandOffset = r.offset;
-  win.webContents.send('island-offset', islandOffset);
+  win.webContents.send('island-offset', { ...islandOffset, edge: r.edge });
 }
 
 // Where the Dock is: its side and auto-hide setting, and its frame from
@@ -1024,8 +1024,9 @@ function stopGuide() {
   if (!teach && !jarvisRun) stopInputHook();
 }
 
+// The Done button: they've done this step (a decision is checked first).
 ipcMain.on('guide-next', () => {
-  if (replay) replay.skip();
+  if (replay) replay.done();
   if (improv) improv.skip();
 });
 // Said or typed during a lesson: part of the conversation, no "Hey Friday" needed.

@@ -274,6 +274,12 @@ class Replay {
     this.view = this.latest ? this.viewOf(this.latest) : null;
     this.lostSince = this.target || !a.label || a.kind === 'any-click' ? 0 : Date.now();
     this.aheadAtStart = new Set(this.upcoming().filter((i) => this.latest && locate(this.actions[i], this.latest.elements)));
+    // What later fields hold now, so typing in one counts as having moved on.
+    this.aheadValues = new Map(
+      this.upcoming()
+        .filter((i) => this.actions[i].kind === 'edit')
+        .map((i) => [i, this.latest ? (locate(this.actions[i], this.latest.elements) || {}).value : undefined])
+    );
     this.emit({
       status: 'step',
       say: say != null ? say : lineFor(a, this.skill),
@@ -306,11 +312,31 @@ class Replay {
   // it was pointed at (the menu it opens, the page it leads to): however they
   // did it, and even mid-sentence, they're there. Returns that action's index or -1.
   aheadOf(s) {
+    const focus = s.focused && normalize(s.focused.label || '');
     for (const i of this.upcoming()) {
+      const later = this.actions[i];
+      // Working on a later field: the keyboard's in it, or it's been typed in.
+      if (later.kind === 'edit') {
+        if (focus && focus === normalize(later.label)) return i;
+        const f = locate(later, s.elements);
+        if (f && this.aheadValues && this.aheadValues.has(i) && f.value !== this.aheadValues.get(i)) return i;
+      }
       if (this.aheadAtStart.has(i)) continue;
-      if (locate(this.actions[i], s.elements)) return i;
+      if (locate(later, s.elements)) return i;
     }
     return -1;
+  }
+
+  // "Done" (the button, or saying so): they say this step is done. A decision
+  // is still checked first; anything else moves straight on.
+  done() {
+    if (!this.running || this.recovering || this.judging || !this.action) return;
+    const a = this.action;
+    if (a.kind === 'edit' && this.judge && this.needsJudging(a)) {
+      const field = this.latest && locate(a, this.latest.elements);
+      if (field) return this.checkJudgment(a, field, this.latest);
+    }
+    this.complete(0);
   }
 
   onScan(s) {
@@ -397,6 +423,20 @@ class Replay {
   onMouseDown(x, y) {
     if (!this.running || this.recovering || this.judging || !this.action) return;
     const a = this.action;
+    // Clicked what a later step needs: they're already there. (Not past a
+    // decision they haven't filled in yet, which the check below catches.)
+    if (this.latest && !(a.kind === 'edit' && this.judge && this.needsJudging(a))) {
+      for (const i of this.upcoming()) {
+        const later = this.actions[i];
+        if (later.kind !== 'click') continue;
+        const t = locate(later, this.latest.elements);
+        if (t && inside(x, y, t)) {
+          this.index = i;
+          this.target = t;
+          return this.complete(120);
+        }
+      }
+    }
     if (a.kind === 'any-click') return this.complete(150);
     if ((a.kind === 'click') && this.target && inside(x, y, this.target)) return this.complete(120);
     // Clicked something else while a particular button was wanted.

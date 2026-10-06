@@ -880,6 +880,13 @@ nextBtn.addEventListener('click', () => {
   stopSpeaking();
   guideThinking();
   window.buddy.guideNext();
+  // If nothing comes back (it was busy), don't leave the button stuck.
+  setTimeout(() => {
+    if (nextBtn.disabled) {
+      nextBtn.disabled = false;
+      buddyEl.classList.remove('thinking');
+    }
+  }, 6000);
 });
 // Typing a question mid-lesson: the box takes the keyboard until it's sent.
 const guideAskForm = $('guide-ask-form');
@@ -1597,12 +1604,12 @@ function reportIsland(open) {
   window.buddy.islandBox(box);
 }
 
-// Slide out of the way (main.js works out where): the island and the orb move
-// together along the edge, smoothly, and back again.
-window.buddy.on('island-offset', ({ x, y }) => {
+// Slide clear of the Dock (main.js works out where): the island and the orb
+// move together along the edge they're flush with, smoothly, and back again.
+window.buddy.on('island-offset', ({ x, y, edge }) => {
   document.body.style.setProperty('--island-dx', `${x}px`);
   document.body.style.setProperty('--island-dy', `${y}px`);
-  document.body.classList.toggle('island-moved', Boolean(x || y));
+  document.body.dataset.islandEdge = edge || '';
 });
 new ResizeObserver(fitShell).observe(shellIn);
 // Things appearing or hiding (and waking or resting) change what it holds.

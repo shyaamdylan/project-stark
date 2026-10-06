@@ -208,6 +208,9 @@ class Tutor {
   }
 }
 
+// "Done", "I've done that", "finished", "next": the step's done, said out loud.
+const DONE_WORDS = /^(?:(?:ok(?:ay)?|right|yep|yeah|cool|great|so)[\s,.!]*)*(?:(?:i'?ve|i have|i'?m|that'?s|it'?s|all)\s+)?(?:done|finished|did (?:it|that)|completed?(?: it| that)?|next(?: step)?)(?:\s+(?:that|it|this|this step|that step|that bit|now|too))*[\s.!]*$/i;
+
 // The lesson: the replay for speed, the observer for awareness, the tutor for judgment.
 class Lesson {
   // deps:
@@ -219,7 +222,7 @@ class Lesson {
   //   idleMs             quiet time after an instruction before checking in
   //   offPathDelayMs     how long to let a stray click play out before commenting
   //   snap(scan)         a screenshot of the front window for a tutor turn, or null
-  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 30000, offPathDelayMs = 1500, now = () => Date.now() }) {
+  constructor({ skill, plan, scan, emit, thinking = () => {}, tutor, snap = async () => null, idleMs = 12000, offPathDelayMs = 900, now = () => Date.now() }) {
     this.snap = snap;
     this.skill = skill;
     this.emitOut = emit;
@@ -311,9 +314,19 @@ class Lesson {
     this.replay.skip();
   }
 
-  // Anything they say or type during the lesson goes straight to the tutor.
+  // The Done button, or saying "done": this step's done, move on (a decision
+  // they filled in is checked first). No Claude call, so it's instant.
+  done() {
+    if (!this.running) return;
+    clearTimeout(this.timer);
+    this.replay.done();
+  }
+
+  // Anything they say or type during the lesson goes to the tutor, except a
+  // plain "done", which is the Done button said out loud.
   onUserSays(text) {
     if (!this.running || !String(text || '').trim()) return;
+    if (DONE_WORDS.test(String(text).trim())) return this.done();
     clearTimeout(this.timer);
     this.ask('said', String(text).trim());
   }

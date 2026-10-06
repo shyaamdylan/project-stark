@@ -1,23 +1,18 @@
-// Keeping the corner island out of the way: of the Dock when it's showing over
-// the corner, and of the cursor when it comes for something underneath.
+// Keeping the corner island clear of the Dock.
 //
-// Movement is kept to a minimum: the island only ever slides along the edge it
-// sits on (up from the bottom, or left from a right-hand Dock), as far as it
-// needs to and no further, and it comes back only once the cursor has left
-// both where it was and where it went. While it's asking something (a question
-// with buttons, a box to type in) it stays put so it can be answered.
+// When the Dock is showing over the corner (always there, or an auto-hiding
+// Dock that's popped up), the island slides along the edge it sits on, just
+// far enough to clear it: up from the bottom for a bottom Dock, left for a
+// right-hand one. When the Dock hides again, it slides back. Nothing else
+// moves it.
 
-const MARGIN = 14; // how close the cursor gets before it counts as "coming for it"
 const GAP = 8; // space left between the island and the Dock
-const RETURN_MS = 600; // the cursor has to stay away this long before it comes back
 
-const inside = (p, r, m = 0) => p.x >= r.x - m && p.y >= r.y - m && p.x <= r.x + r.w + m && p.y <= r.y + r.h + m;
 const overlapX = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w;
 const overlapY = (a, b) => a.y < b.y + b.h && b.y < a.y + a.h;
-const shift = (r, o) => ({ ...r, x: r.x + o.x, y: r.y + o.y });
 
-// Is an auto-hiding Dock showing? It pops up when the cursor reaches its edge
-// over it, and hides once the cursor moves well away.
+// Is the Dock showing? An auto-hiding one pops up when the cursor reaches its
+// edge over it, and hides once the cursor moves well away.
 function dockShowing(dock, cursor, screen, wasShowing) {
   if (!dock || !dock.rect) return false;
   if (!dock.autohide) return true;
@@ -34,42 +29,18 @@ function dockShowing(dock, cursor, screen, wasShowing) {
   return wasShowing && cursor.x <= screen.x + r.w + 24;
 }
 
-// One tick. island: { w, h, interactive } (its size now); screen: the display
-// rect { x, y, w, h }; dock: { side, autohide, rect } or null; cursor: { x, y };
-// state from the last tick (start with {}). Returns { offset: { x, y }, state }.
-function avoid({ island, screen, dock, cursor, now = Date.now() }, state = {}) {
-  const s = { fled: false, outSince: 0, dockShown: false, ...state };
+// One tick. island: { w, h } (its size now); screen: the display { x, y, w, h };
+// dock: { side, autohide, rect } or null; cursor: { x, y } (for an auto-hiding
+// Dock); state from the last tick (start with {}). Returns { offset, edge, state }:
+// edge is the screen edge it stays flush against while moved ('right' or
+// 'bottom'), or null when it's home in the corner.
+function avoid({ island, screen, dock, cursor }, state = {}) {
+  const s = { dockShown: false, ...state };
   const home = { x: screen.x + screen.w - island.w, y: screen.y + screen.h - island.h, w: island.w, h: island.h };
-
-  // Clear of the Dock, if it's showing over the corner.
   s.dockShown = dockShowing(dock, cursor, screen, s.dockShown);
-  const base = { x: 0, y: 0 };
-  if (s.dockShown && dock && dock.rect) {
-    if (dock.side === 'bottom' && overlapX(home, dock.rect)) base.y = -(dock.rect.h + GAP);
-    if (dock.side === 'right' && overlapY(home, dock.rect)) base.x = -(dock.rect.w + GAP);
-  }
-  const rest = shift(home, base);
-
-  // Out of the cursor's way: straight up by its own height.
-  const away = { x: base.x, y: base.y - (island.h + MARGIN) };
-  const fledTo = shift(home, away);
-  if (island.interactive) {
-    s.fled = false;
-    s.outSince = 0;
-  } else if (!s.fled) {
-    if (inside(cursor, rest, MARGIN)) {
-      s.fled = true;
-      s.outSince = 0;
-    }
-  } else if (inside(cursor, rest, MARGIN) || inside(cursor, fledTo, MARGIN)) {
-    s.outSince = 0; // still around it (or using it where it went): stay
-  } else if (!s.outSince) {
-    s.outSince = now;
-  } else if (now - s.outSince >= RETURN_MS) {
-    s.fled = false;
-    s.outSince = 0;
-  }
-  return { offset: s.fled ? away : base, state: s };
+  if (s.dockShown && dock.side === 'bottom' && overlapX(home, dock.rect)) return { offset: { x: 0, y: -(dock.rect.h + GAP) }, edge: 'right', state: s };
+  if (s.dockShown && dock.side === 'right' && overlapY(home, dock.rect)) return { offset: { x: -(dock.rect.w + GAP), y: 0 }, edge: 'bottom', state: s };
+  return { offset: { x: 0, y: 0 }, edge: null, state: s };
 }
 
 module.exports = { avoid, dockShowing };

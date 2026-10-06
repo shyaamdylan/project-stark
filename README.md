@@ -131,6 +131,9 @@ sitting next to you rather than a click-through tutorial:
   screen before she moves on. Code a €7,200 equipment invoice to opex and she stops you: "Hold
   on, the expert would stop here. Equipment over €5,000 is always capex." Change it and she
   checks again.
+- **She notices you've moved on.** Clicking what a later step needs, or moving into a later step's
+  field, moves the lesson there at once. **Done ✓** (or just saying "done") marks a step done; a
+  decision is checked first. If you go quiet she checks in after about 12 seconds.
 - **On track, she keeps up instantly.** Do the step and she's onto the next one, no waiting.
 - **Off track, she helps.** "That opened Preferences. Close it, then click Export." Got there
   another way? She accepts it and carries on.
@@ -179,9 +182,9 @@ The orb lives in a black island flush in the screen's bottom-right corner, so it
 the MacBook's frame. Resting, it's a small nub with a dim orb. When Friday or Jarvis is active it
 grows up and to the left to hold everything: what they're doing (Listening, Thinking, Speaking),
 what they say, their questions and Jarvis's task panel. When they're done it shrinks back.
-It keeps out of the way: when the Dock is showing over the corner it slides just clear of it, and
-when the cursor comes for something underneath it slides straight up (and back once the cursor has
-gone). It stays put while it's asking you something. Growing, shrinking and moving are all eased:
+It keeps clear of the Dock: when the Dock is showing over the corner it slides just clear of it,
+staying flush with the screen edge (square where it meets the bezel), and slides back when the Dock
+hides. Nothing else moves it. Growing, shrinking and moving are all eased:
 what's inside fades out before the shape shrinks.
 Left alone for 15 seconds (nothing said, no new step, no hover), it shrinks back to the nub even
 if a lesson or question is still open; the next thing that happens brings it straight back.

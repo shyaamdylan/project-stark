@@ -190,3 +190,43 @@ test('steps that are not decisions are never sent for checking', async () => {
   await settle(r, '9999');
   assert.equal(emitted.at(-1).status, 'done');
 });
+
+test('clicking what a later step needs counts as being there, straight away', async () => {
+  const { r, emitted } = makeReplay([scanOf('Bills', [file, newFolder])]);
+  r.index = 1; // "click File", with New Folder already showing
+  r.point();
+  r.onMouseDown(newFolder.x + 5, newFolder.y + 5);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(r.index, 3, 'past New Folder, onto the next step');
+  assert.equal(emitted.at(-1).stepNumber, 3);
+});
+
+test('moving into a later field counts as having moved on', () => {
+  const later = { ...skill, map: { ...skill.map, steps: skill.map.steps.map((st) => ({ ...st, is_judgment: false, guardrails: [] })) } };
+  const emitted = [];
+  const r = new Replay({ skill: later, scan: async () => null, emit: (x) => emitted.push(x), recover: async () => ({ status: 'stuck' }) });
+  r.running = true;
+  r.latest = scanOf('Bill', [file, cost('4711')]);
+  r.index = 1;
+  r.point();
+  r.onScan({ ...scanOf('Bill', [file, cost('4711')]), focused: { role: 'AXTextField', label: 'Cost center', value: '4711' } });
+  assert.equal(r.index, 3);
+});
+
+test('"Done" on a decision checks it first; on anything else it just moves on', async () => {
+  const { r } = makeReplay([scanOf('Bill', [cost('4711')])]);
+  const judged = [];
+  r.judge = async (a, field) => (judged.push(field.value), { ok: false, say: 'Hold on.' });
+  r.index = 3;
+  r.point();
+  r.done();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(judged, ['4711']);
+  assert.equal(r.index, 3, 'stopped at the decision');
+  r.index = 1;
+  r.latest = scanOf('Bills', [file]);
+  r.point();
+  r.done();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(r.index, 2);
+});

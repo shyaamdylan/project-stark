@@ -944,16 +944,20 @@ body.island #shell:not(.open) {
 body.island #shell.open {
   border-top-left-radius: 24px;
 }
-/* Sliding clear of the cursor or the Dock (renderer.js 'island-offset'). Away
-   from the corner it's a free-floating panel, so every corner is rounded. */
+/* Sliding clear of the Dock (renderer.js 'island-offset'). */
 body.island #shell,
 body.island #orb {
   /* The translate property, not transform, so the orb's own flare animation
      (a transform) never snaps it back mid-slide. */
   translate: var(--island-dx, 0px) var(--island-dy, 0px);
 }
-body.island.island-moved #shell {
-  border-radius: 18px;
+/* Moved clear of the Dock, it still grows out of the bezel on the edge it's
+   flush with: those corners stay square, the free ones are rounded. */
+body.island[data-island-edge='right'] #shell {
+  border-radius: 20px 0 0 20px;
+}
+body.island[data-island-edge='bottom'] #shell {
+  border-radius: 20px 20px 0 0;
 }
 body.island #shell-in {
   display: flex;
