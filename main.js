@@ -1879,12 +1879,12 @@ ipcMain.on('teach-narrate', (_e, text) => {
 ipcMain.on('teach-speaking', (_e, on) => {
   if (teach) teach.session.onSpeaking(Boolean(on));
 });
-ipcMain.handle('transcribe', async (_e, wav) => {
+ipcMain.handle('transcribe', async (_e, wav, opts) => {
   try {
-    return await transcribe(Buffer.from(wav), cfg);
+    return await transcribe(Buffer.from(wav), cfg, opts || {});
   } catch (err) {
     console.error('[stt]', err.message);
-    return '';
+    return { text: '', others: false };
   }
 });
 

@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('buddy', {
   teachOffRecord: (off) => ipcRenderer.send('teach-off-record', off),
   teachNarrate: (text) => ipcRenderer.send('teach-narrate', text),
   teachSpeaking: (on) => ipcRenderer.send('teach-speaking', on),
-  transcribe: (wav) => ipcRenderer.invoke('transcribe', wav),
+  transcribe: (wav, opts) => ipcRenderer.invoke('transcribe', wav, opts),
   openHub: () => ipcRenderer.send('open-hub'),
   // Heard its name: start reading the screen while they finish the sentence.
   prepare: () => ipcRenderer.send('prepare'),

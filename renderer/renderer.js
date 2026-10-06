@@ -1299,9 +1299,21 @@ const WAKING_MS = 15000;
 let earlyHead = null; // { id, text: Promise<string> } for the utterance in progress
 const isActive = () => Boolean(state.listening || state.answering || state.teaching || state.executing || state.guiding || convoOpen());
 
+// Speech to text. { forName } checks for the name, { forUs } is what followed
+// it: both are kept whatever language the room is speaking. Otherwise speech in
+// another language is dropped, and noted: other people are talking nearby.
+const OTHERS_MS = 30000;
+let othersAt = 0;
+async function hear(wav, opts) {
+  const r = await window.buddy.transcribe(wav, opts).catch(() => null);
+  if (r && r.others) othersAt = Date.now();
+  return (r && r.text) || '';
+}
+const othersTalking = () => Date.now() - othersAt < OTHERS_MS;
+
 function onHead(wav, id) {
   if (isActive() || !state.wakeEnabled) return;
-  const text = window.buddy.transcribe(wav).catch(() => '');
+  const text = hear(wav, { forName: true });
   earlyHead = { id, text };
   text.then((t) => {
     const w = splitWake(t);
@@ -1332,15 +1344,15 @@ async function heard(wav, clip = {}) {
       // Speech that isn't for the buddy costs that little and no more.
       const early = earlyHead && earlyHead.id === clip.id ? earlyHead.text : null;
       earlyHead = null;
-      const opening = await (early || window.buddy.transcribe(clip.head()));
+      const opening = await (early || hear(clip.head(), { forName: true }));
       if (!splitWake(opening).woke) {
         state.wakingUntil = 0;
         return;
       }
       wakeUp();
-      raw = clip.longerThanHead ? await window.buddy.transcribe(wav) : opening;
+      raw = clip.longerThanHead ? await hear(wav, { forUs: true }) : opening;
     } else {
-      raw = await window.buddy.transcribe(wav);
+      raw = await hear(wav);
     }
   } catch {
     return;
@@ -1398,12 +1410,13 @@ async function heard(wav, clip = {}) {
   }
   // Background listening: only act when it starts with the wake word, or
   // straight after an exchange (a follow-up needs no wake word). While another
-  // app is playing sound the mic can hear, a follow-up needs the name too:
-  // otherwise a video talking would count as you.
+  // app is playing sound the mic can hear, or other people nearby were just
+  // heard talking, a follow-up needs the name too: otherwise a video or the
+  // room would count as you.
   const otherSound = state.macAudio && !Mic.cancelsMacAudio();
   if (!woke && NOT_WORDS.test(text)) return; // noises and filler, not a follow-up
-  if (!woke && convoOpen() && hasWords(text) && otherSound) {
-    console.log('[mic] ignored (no name, and another app is playing sound)');
+  if (!woke && convoOpen() && hasWords(text) && (otherSound || othersTalking())) {
+    console.log(`[mic] ignored (no name, and ${otherSound ? 'another app is playing sound' : 'other people are talking nearby'})`);
     return;
   }
   if ((state.wakeEnabled && woke) || (convoOpen() && hasWords(text))) {
