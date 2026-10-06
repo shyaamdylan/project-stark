@@ -75,6 +75,10 @@ function loadConfig(userDataDir) {
     // the corner), "notch" (top centre) or "auto" (the notch when the screen
     // has one, else the corner).
     orbPlace: ['notch', 'auto', 'float'].find((p) => p === String(get('ORB_PLACE', 'corner')).toLowerCase()) || 'corner',
+    // Long side of a screenshot sent to Claude, in pixels. Tokens grow with the
+    // area: 1280 is about 1,300 tokens for a whole screen, 1568 (the most
+    // Claude uses) about 2,000.
+    screenshotPx: Math.min(1568, Math.max(640, Number(get('SCREENSHOT_PX', '1280')) || 1280)),
     screenArea: /^window$/i.test(get('SCREEN_AREA', 'screen')) ? 'window' : 'screen',
     // Jarvis does learned tasks for you. Say "Hey Jarvis" to talk to him.
     jarvis: {

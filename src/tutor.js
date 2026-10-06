@@ -142,7 +142,7 @@ class Tutor {
   async expect(ctx) {
     const step = this.skill.map.steps[ctx.stepNumber - 1];
     if (!step) return { expected: [], sayIfWrong: '' };
-    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || [], { withPicture: Boolean(ctx.image) });
     const text = [...this.stepFacts(step, ctx, screen), `The field: "${ctx.label}", holding "${ctx.value || ''}" now.`].join('\n');
     const response = await this.client.beta.messages.create({
       model: MODEL,
@@ -167,7 +167,7 @@ class Tutor {
   async judge(ctx) {
     const step = this.skill.map.steps[ctx.stepNumber - 1];
     if (!step) return { ok: true, say: '', target: null };
-    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || [], { withPicture: Boolean(ctx.image) });
     const text = [...this.stepFacts(step, ctx, screen), `The learner entered "${ctx.value}" in "${ctx.label}".`].join('\n');
     const response = await this.client.beta.messages.create({
       model: MODEL,
@@ -206,7 +206,7 @@ class Tutor {
   // One turn. ctx: { trigger, detail, did: [lines], where, lesson: { stepNumber, totalSteps, line, skipped }, scan }
   async turn(ctx) {
     if (this.turns.length >= MAX_TURNS) return { say: "Let's pause the lesson here. Ask me again whenever you like.", target: null, stepNumber: null, then: 'wait', skipSteps: [], status: 'stop' };
-    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || [], { withPicture: Boolean(ctx.image) });
     this.chosen = screen.chosen;
     const l = ctx.lesson || {};
     const parts = [];

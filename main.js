@@ -648,9 +648,11 @@ async function captureFront(scan) {
   rect.width = Math.min(rect.width, img.getSize().width - rect.x);
   rect.height = Math.min(rect.height, img.getSize().height - rect.y);
   let shot = img.crop(rect);
-  // Claude reads images up to about 1568 px on the long side; bigger only costs more.
+  // An image costs tokens by its pixel area (about one per 28×28 square), so
+  // it's sent at SCREENSHOT_PX on the long side: a whole screen is still easy
+  // to read, at about two thirds of the tokens of Claude's 1568 px maximum.
   const long = Math.max(rect.width, rect.height);
-  if (long > 1568) shot = shot.resize(rect.width >= rect.height ? { width: 1568 } : { height: 1568 });
+  if (long > cfg.screenshotPx) shot = shot.resize(rect.width >= rect.height ? { width: cfg.screenshotPx } : { height: cfg.screenshotPx });
   const size = shot.getSize();
   return { data: shot.toJPEG(80).toString('base64'), width: size.width, height: size.height, frame, area: whole ? 'screen' : 'window', windows: scan.windows || [] };
 }

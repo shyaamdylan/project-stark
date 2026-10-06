@@ -130,3 +130,23 @@ test('hidden dock items are listed and marked', () => {
   ]);
   assert.match(text, /^0 \| dock item \| "Notes" \| Dock \| 400,1117 \(hidden\)$/m);
 });
+
+test('with a screenshot alongside, the screen list keeps what can be clicked and drops what the picture shows', () => {
+  const { describeScreen } = require('../src/guide');
+  const els = [
+    { role: 'AXDockItem', label: 'Mail', app: 'Dock', x: 400, y: 880, w: 40, h: 40 },
+    { role: 'AXButton', label: 'Save', app: 'Acme', x: 600, y: 40, w: 60, h: 24 },
+    { role: 'AXButton', label: 'Behind', app: 'Other', x: 10, y: 10, w: 60, h: 24, hidden: true },
+    { role: 'AXStaticText', label: 'A very long paragraph of text that the screenshot shows perfectly well already', app: 'Acme', x: 40, y: 200, w: 500, h: 40 },
+    ...Array.from({ length: 300 }, (_, i) => ({ role: 'AXStaticText', label: `Row ${i}`, app: 'Acme', x: 40, y: 300 + i, w: 80, h: 18 })),
+    { role: 'AXTextField', label: 'Cost center', app: 'Acme', x: 40, y: 900, w: 200, h: 30 },
+  ];
+  const full = describeScreen(els);
+  const lean = describeScreen(els, { withPicture: true });
+  const labels = lean.chosen.map((e) => e.label);
+  assert.ok(labels.includes('Save') && labels.includes('Cost center'), 'everything clickable is kept');
+  assert.ok(!labels.includes('Mail') && !labels.includes('Behind'), 'no Dock, nothing covered');
+  assert.ok(!labels.some((l) => l.startsWith('A very long')), 'no paragraphs');
+  assert.ok(lean.chosen.length <= 160);
+  assert.ok(lean.text.length < full.text.length * 0.6, `${lean.text.length} vs ${full.text.length}`);
+});

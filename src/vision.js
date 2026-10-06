@@ -95,7 +95,7 @@ You can see a screenshot of their Mac (the whole screen, or the front window whe
 async function lookAtScreen(apiKey, { question, image, scan, agent = 'friday', address = '', history = '', client = null }) {
   const c = client || new Anthropic({ apiKey });
   const voice = agent === 'jarvis' ? VOICES.jarvis(address) : VOICES.friday;
-  const list = describeScreen((scan && scan.elements) || []);
+  const list = describeScreen((scan && scan.elements) || [], { withPicture: true });
   const response = await c.beta.messages.create({
     model: MODEL,
     max_tokens: 2000,

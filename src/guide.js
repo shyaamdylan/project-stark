@@ -13,6 +13,10 @@ const { describeEvent } = require('./apprentice');
 const MODEL = 'claude-opus-5-5';
 const MAX_STEPS = 25;
 const MAX_ELEMENTS = 350;
+// With a screenshot alongside, the list only needs to give exact positions for
+// what can be clicked: the picture shows the text, the Dock and what's behind.
+const MAX_WITH_PICTURE = 160;
+const CLICKABLE = new Set(['AXButton', 'AXMenuButton', 'AXPopUpButton', 'AXLink', 'AXTab', 'AXRadioButton', 'AXCheckBox', 'AXMenuBarItem', 'AXMenuItem', 'AXSearchField', 'AXTextField', 'AXComboBox', 'AXSlider', 'AXTextArea', 'AXCell', 'AXRow', 'AXDisclosureTriangle', 'AXIncrementor', 'AXColorWell']);
 
 const SYSTEM = `You are the voice of a small on-screen helper on a Mac. You learned a task by watching an expert do it, and now you guide someone else through it, one step at a time, by pointing at things on their screen.
 
@@ -65,7 +69,11 @@ const ROLE_WORDS = {
 
 // Number the elements and render them as compact lines. Long scans are cut to
 // the front-most windows; menus and menu bar items are always kept.
-function describeScreen(elements) {
+// withPicture: a screenshot goes along, so keep it lean (MAX_WITH_PICTURE):
+// things to click first, short text to fill the room, nothing the picture
+// already shows that can't be clicked (the Dock, things covered up).
+function describeScreen(elements, { withPicture = false } = {}) {
+  if (withPicture) return lean(elements);
   const keepFirst = (e) => e.role === 'AXMenuBarItem' || e.role === 'AXMenuItem' || e.role === 'AXDockItem';
   const rest = elements
     .filter((e) => !keepFirst(e))
@@ -73,6 +81,22 @@ function describeScreen(elements) {
     .filter((e) => !(e.role === 'AXStaticText' && e.label.length > 80))
     .sort((a, b) => (a.z || 0) - (b.z || 0) || a.y - b.y || a.x - b.x);
   const chosen = elements.filter(keepFirst).concat(rest).slice(0, MAX_ELEMENTS);
+  return render(chosen);
+}
+
+function lean(elements) {
+  const order = (a, b) => (a.z || 0) - (b.z || 0) || a.y - b.y || a.x - b.x;
+  const visible = elements.filter((e) => !e.hidden && e.role !== 'AXDockItem' && String(e.label || '').trim());
+  const menus = visible.filter((e) => e.role === 'AXMenuBarItem' || e.role === 'AXMenuItem');
+  const clickable = visible.filter((e) => CLICKABLE.has(e.role) && !menus.includes(e)).sort(order);
+  const text = visible.filter((e) => !CLICKABLE.has(e.role) && String(e.label).length <= 40).sort(order);
+  const chosen = menus.concat(clickable, text).slice(0, MAX_WITH_PICTURE);
+  // Back in screen order, so it reads top to bottom.
+  const menuCount = Math.min(menus.length, chosen.length);
+  return render(chosen.slice(0, menuCount).concat(chosen.slice(menuCount).sort(order)));
+}
+
+function render(chosen) {
   const lines = chosen.map((e, i) =>
     `${i} | ${ROLE_WORDS[e.role] || e.role.replace(/^AX/, '').toLowerCase()} | "${e.label.replace(/"/g, "'")}" | ${e.app || ''} | ${Math.round(e.x)},${Math.round(e.y)}${e.hidden ? ' (hidden)' : ''}`
   );

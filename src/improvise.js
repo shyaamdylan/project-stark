@@ -156,7 +156,7 @@ class Improviser {
     }
     this.inFlight = true;
     try {
-      const screen = describeScreen(scan && scan.elements ? scan.elements : []);
+      const screen = describeScreen(scan && scan.elements ? scan.elements : [], { withPicture: Boolean(image) });
       this.chosen = screen.chosen;
       const turn = { note: `${note}${scan && scan.app ? `\nIn front of them: ${screenContext(scan)}` : ''}`, screen: screen.text || '(nothing readable on screen)', image, reply: null };
       this.turns.push(turn);
