@@ -118,3 +118,33 @@ test('if the target never appears, Claude is asked where the user is', async () 
   assert.equal(emitted.at(-1).say, 'Go back to the bill first.');
   assert.equal(r.index, 1);
 });
+
+test("already past a step (what the next one needs just appeared): it moves on without waiting for the click", () => {
+  const { r, emitted } = makeReplay([scanOf('Bills', [file])]);
+  r.index = 1; // "click File"
+  r.point();
+  assert.equal(emitted.at(-1).target.label, 'File');
+  // They opened the menu some other way (a shortcut, a click a little off): New Folder is showing.
+  r.onScan(scanOf('Bills', [file, newFolder]));
+  assert.equal(r.index, 2);
+  assert.match(emitted.at(-1).say, /ahead of me/);
+  assert.equal(emitted.at(-1).target.label, 'New Folder');
+});
+
+test("something already on screen when the step began isn't taken as being ahead", () => {
+  const { r } = makeReplay([scanOf('Bills', [file, newFolder])]);
+  r.index = 1;
+  r.point();
+  r.onScan(scanOf('Bills', [file, newFolder]));
+  assert.equal(r.index, 1);
+});
+
+test('the thing pointed at moves (a scroll, a dragged window): the pointer follows it', () => {
+  const { r, emitted } = makeReplay([scanOf('Bills', [file])]);
+  r.index = 1;
+  r.point();
+  r.onScan(scanOf('Bills', [{ ...file, x: 300, y: 120 }]));
+  assert.equal(r.index, 1);
+  assert.equal(emitted.at(-1).quietMove, true);
+  assert.deepEqual([emitted.at(-1).target.x, emitted.at(-1).target.y], [300, 120]);
+});

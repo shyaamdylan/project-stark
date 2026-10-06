@@ -18,6 +18,8 @@ const { findBest, normalize } = require('./matcher');
 const RETRY_MS = 2500; // how long to keep looking for a target before asking Claude
 const SETTLE_MS = 900; // a field must stop changing this long to count as filled in
 const MAX_RECOVERIES = 2; // Claude calls per step before we just wait quietly (Next still works)
+const LOOK_AHEAD = 4; // how many actions ahead to watch for, to notice the user is already past this one
+const MOVED_PX = 4; // the thing being pointed at moved (scrolled, window dragged): follow it
 
 // Clicks on rows, cells and text are about the specific record (this invoice,
 // that file), so the user's equivalent won't have the same label. Any click counts.
@@ -159,6 +161,7 @@ class Replay {
     this.recovering = false;
     this.recoveries = 0;
     this.wakeScan = null;
+    this.aheadAtStart = new Set(); // later actions already on screen when this one was pointed at
     this.skipped = new Set(); // step indexes the user chose to leave out
     this.progressAt = Date.now(); // when an action was last completed
     // Set by a tutor (src/tutor.js) to hear about the user going off the path:
@@ -235,6 +238,7 @@ class Replay {
     this.editSeenAt = 0;
     this.view = this.latest ? this.viewOf(this.latest) : null;
     this.lostSince = this.target || !a.label || a.kind === 'any-click' ? 0 : Date.now();
+    this.aheadAtStart = new Set(this.upcoming().filter((i) => this.latest && locate(this.actions[i], this.latest.elements)));
     this.emit({
       status: 'step',
       say: say != null ? say : lineFor(a, this.skill),
@@ -251,11 +255,55 @@ class Replay {
     return Boolean(s && a && (atDestination(s, a.destination) || nextTargetVisible(this.actions, this.index, s.elements)));
   }
 
+  // The next few actions with something to find on screen (not past a "go").
+  upcoming() {
+    const out = [];
+    for (let i = this.index + 1; i < this.actions.length && out.length < LOOK_AHEAD; i++) {
+      const a = this.actions[i];
+      if (a.kind === 'go') break;
+      if (this.skipped.has(a.stepIndex)) continue;
+      if (a.label && a.kind !== 'shortcut') out.push(i);
+    }
+    return out;
+  }
+
+  // Already past this action? Something a later action needs has appeared since
+  // it was pointed at (the menu it opens, the page it leads to): however they
+  // did it, and even mid-sentence, they're there. Returns that action's index or -1.
+  aheadOf(s) {
+    for (const i of this.upcoming()) {
+      if (this.aheadAtStart.has(i)) continue;
+      if (locate(this.actions[i], s.elements)) return i;
+    }
+    return -1;
+  }
+
   onScan(s) {
     this.latest = s;
     if (!this.running || this.recovering || !this.action) return;
     const a = this.action;
     const view = this.viewOf(s);
+
+    if (a.kind !== 'go' && !this.completing) {
+      const ahead = this.aheadOf(s);
+      if (ahead > this.index) {
+        this.index = ahead;
+        this.recoveries = 0;
+        this.progressAt = Date.now();
+        const next = this.actions[ahead];
+        this.point({ say: `You're ahead of me. ${lineFor(next, this.skill)}` });
+        return;
+      }
+    }
+
+    // The thing being pointed at moved (a scroll, the window dragged): follow it.
+    if (this.target && a.label && (a.kind === 'click' || a.kind === 'edit')) {
+      const now = locate(a, s.elements);
+      if (now && (Math.abs(now.x - this.target.x) > MOVED_PX || Math.abs(now.y - this.target.y) > MOVED_PX || Math.abs(now.w - this.target.w) > MOVED_PX)) {
+        this.target = a.kind === 'edit' ? { ...now, value: this.target.value } : now;
+        this.emit({ status: 'step', say: '', note: '', target: now, stepNumber: a.stepIndex + 1, totalSteps: this.total, quietMove: true });
+      }
+    }
 
     // However they got there.
     if (a.kind === 'go') {

@@ -61,6 +61,7 @@ const { findBest, normalize } = require('./src/matcher');
 const voice = require('./src/voice');
 const { findNotches, overlayLayout } = require('./src/notch');
 const { checkOtherAudio } = require('./src/macaudio');
+const { relocate, anchorFor, followAnchor, moved } = require('./src/track');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
 
@@ -301,11 +302,13 @@ function splitWake(text) {
 const stripWake = (text) => splitWake(text).rest;
 
 ipcMain.handle('ask', async (_e, rawText, who) => {
+  stopTracking();
   sessionLog.convo('You', rawText);
   turnHistory = convo.forPrompt();
   convo.add('user', splitWake(rawText).rest);
   const res = await handleAsk(rawText, who);
   remember(rawText, res);
+  trackPointed(res);
   sessionLog.convoFromReply(res, agent);
   return res;
 });
@@ -325,8 +328,107 @@ async function handleAsk(rawText, who) {
   }
 }
 
+// ---------- keeping the highlight on what it points at (src/track.js) ----------
+//
+// After an answer points at something, keep checking the front window for a
+// little while: if the thing moves (a scroll, the window dragged) the highlight
+// follows; if it goes away, or they switch to another window, the highlight goes.
+const TRACK_MS = 15000;
+const TRACK_EVERY_MS = 900;
+let tracking = null;
+
+function stopTracking() {
+  if (tracking) clearInterval(tracking.timer);
+  tracking = null;
+}
+
+function trackPointed(res) {
+  stopTracking();
+  if (!res || !res.ok || !res.rect || !win) return;
+  const b = win.getBounds();
+  const t = {
+    rect: { x: res.rect.x + b.x, y: res.rect.y + b.y, w: res.rect.w, h: res.rect.h, label: res.label },
+    label: res.label,
+    picture: res.role === 'part', // a box on a screenshot: follow a named neighbour
+    anchor: null,
+    key: lastScreenKey,
+    until: Date.now() + TRACK_MS,
+    busy: false,
+  };
+  tracking = t;
+  t.timer = setInterval(() => trackTick(t), TRACK_EVERY_MS);
+}
+
+async function trackTick(t) {
+  if (tracking !== t || t.busy) return;
+  if (Date.now() > t.until || replay || improv || jarvisRun || teach) return stopTracking();
+  t.busy = true;
+  try {
+    const s = await scanFrontWindow();
+    if (tracking !== t || !s || s.error) return;
+    if (t.picture && !t.anchor) {
+      t.anchor = anchorFor(t.rect, s.elements);
+      if (!t.anchor) return stopTracking(); // nothing to follow it by: leave it be
+      return;
+    }
+    const now = `${s.app}|${s.window || ''}` === t.key ? (t.picture ? followAnchor(t.rect, t.anchor, s.elements) : relocate(t.rect, t.label, s.elements)) : null;
+    if (!now) {
+      console.log(`[track] "${t.label}" is gone: taking the highlight away`);
+      stopTracking();
+      if (win) win.webContents.send('unpoint');
+      return;
+    }
+    if (moved(now, t.rect)) {
+      t.rect = { ...t.rect, x: now.x, y: now.y, w: now.w, h: now.h };
+      if (t.anchor) t.anchor = { ...t.anchor, x: now.x - t.anchor.dx, y: now.y - t.anchor.dy };
+      if (win) win.webContents.send('repoint', { rect: toLocal(t.rect), label: t.label });
+    }
+  } catch {
+    // A failed scan just waits for the next tick.
+  } finally {
+    t.busy = false;
+  }
+}
+
+// ---------- getting ready while they're still talking ----------
+//
+// The moment the orb hears its name, read the screen (and take the screenshot)
+// in the background, so when the sentence ends the request can start straight
+// away. It's used only if a quick fingerprint says the screen hasn't changed
+// since. No Claude calls, so it costs no tokens.
+const PREPARED_MS = 12000;
+let prepared = null; // { at, scan, fp, image } (promises)
+
+ipcMain.on('prepare', () => {
+  if (prepared && Date.now() - prepared.at < 3000) return;
+  const scan = scanFrontApp({ activate: false }).catch(() => null);
+  prepared = {
+    at: Date.now(),
+    scan,
+    fp: screenFingerprint().catch(() => null),
+    image: scan.then((s) => (s && !s.error && alwaysLook() ? captureFront(s).catch(() => null) : null)),
+  };
+});
+
+// The scan read while they were talking, if the screen still looks the same.
+async function preparedScan() {
+  const p = prepared;
+  prepared = null;
+  if (!p || Date.now() - p.at > PREPARED_MS) return null;
+  const [s, then, now] = await Promise.all([p.scan, p.fp, screenFingerprint().catch(() => null)]);
+  if (!s || s.error || !then || then !== now) return null;
+  console.log(`[ask] using the screen as read while you were talking (${Date.now() - p.at} ms ago)`);
+  refocusFrontApp();
+  return { ...s, prepared: p };
+}
+
 // Scan everything on screen for a request, or a ready-made reply explaining why not.
 async function scanForAsk() {
+  const ready = await preparedScan();
+  if (ready) {
+    lastScreenKey = `${ready.app}|${ready.window || ''}`;
+    return { scan: ready };
+  }
   let scan;
   try {
     scan = await scanFrontApp({ activate: true });
@@ -543,7 +645,8 @@ async function visualAnswer(text, scan, who, why) {
   const p = persona(who, cfg);
   let image;
   try {
-    image = await captureFront(scan);
+    // Taken while they were still talking, if the screen hadn't changed since.
+    image = (scan.prepared && (await scan.prepared.image)) || (await captureFront(scan));
   } catch (err) {
     console.error('[vision] capture', err.message);
     return null;

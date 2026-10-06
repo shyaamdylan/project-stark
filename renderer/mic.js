@@ -125,6 +125,7 @@ const Mic = (() => {
     } else {
       quietMs += FRAME_MS;
     }
+    if (opts.onProgress) opts.onProgress(speechMs);
     const silence = typeof opts.silenceMs === 'function' ? opts.silenceMs() : opts.silenceMs;
     if (quietMs >= silence || chunks.length * FRAME_MS >= MAX_UTTERANCE_MS) finish();
   }
@@ -174,5 +175,6 @@ const Mic = (() => {
   }
 
   // cancelsMacAudio: the Mac's own sound is already removed from what we hear.
-  return { start, stop, isOn: () => Boolean(ctx), isSpeaking: () => speaking, cancelsMacAudio: () => echoReported === 'all' };
+  // peek: what's been said so far in the utterance in progress, as a WAV.
+  return { start, stop, isOn: () => Boolean(ctx), isSpeaking: () => speaking, cancelsMacAudio: () => echoReported === 'all', peek: () => encodeWav(chunks) };
 })();

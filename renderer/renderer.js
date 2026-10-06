@@ -1215,6 +1215,7 @@ function wakeUp() {
   if (state.wakingUntil > Date.now()) return;
   state.wakingUntil = Date.now() + WAKING_MS;
   flare();
+  window.buddy.prepare();
   setTimeout(updateMic, 0);
 }
 
@@ -1283,7 +1284,7 @@ async function heard(wav, clip = {}) {
   // In a lesson, everything said is part of the conversation: questions,
   // "I'm not sure how", "I don't want to do that bit".
   if (state.guiding && !(woke && named && named !== state.agent)) {
-    if (!hasWords(text)) return;
+    if (!hasWords(text) || NOT_WORDS.test(text)) return; // a cough or an "um" isn't something to answer
     showCaption(text);
     if (/^(?:ok(?:ay)?,? )?(?:stop|end|cancel|quit|exit)(?: (?:the|this) (?:lesson|tutorial|walkthrough))?(?: now| please)?[.!]?$/i.test(text)) {
       stopGuide();
@@ -1297,6 +1298,7 @@ async function heard(wav, clip = {}) {
   // app is playing sound the mic can hear, a follow-up needs the name too:
   // otherwise a video talking would count as you.
   const otherSound = state.macAudio && !Mic.cancelsMacAudio();
+  if (!woke && NOT_WORDS.test(text)) return; // noises and filler, not a follow-up
   if (!woke && convoOpen() && hasWords(text) && otherSound) {
     console.log('[mic] ignored (no name, and another app is playing sound)');
     return;
@@ -1324,25 +1326,75 @@ async function heard(wav, clip = {}) {
   }
 }
 
+// ---------- being interrupted, but only by something meaningful ----------
+//
+// Talking over Friday or Jarvis stops them, but a cough, a sneeze, a laugh or
+// an "um" shouldn't. When a sound starts while they're talking, their voice
+// dips instead of stopping; once there's more than half a second of it, what's
+// been said so far is transcribed, and only real words (not their own voice
+// echoing back) stop them. If it was just a noise, the voice comes back up.
+const BARGE_MS = 600;
+const NOT_WORDS = /^(?:[\s,.!?…*()[\]-]*(?:u+h+|u+m+|h+m+|m+|a+h+|o+h+|e+r+|erm|huh|ha(?:ha)*|he(?:he)*|achoo|ahem|bless you|excuse me|sorry|pardon|oops|cough(?:ing)?|sneez\w*|laugh\w*))*[\s,.!?…*()[\]-]*$/i;
+const meaningful = (t) => hasWords(String(t || '')) && !NOT_WORDS.test(String(t)) && !similar(String(t), state.lastSpoken);
+let barge = null; // { checking } while a sound is being checked during their speech
+
+function duckVoice(on) {
+  if (state.audio) state.audio.volume = on ? 0.3 : 1;
+}
+
+function bargeStart() {
+  if (!buddyEl.classList.contains('talking')) return;
+  barge = { checking: false };
+  duckVoice(true);
+}
+
+function bargeProgress(ms) {
+  const b = barge;
+  if (!b || b.checking || ms < BARGE_MS) return;
+  b.checking = true;
+  window.buddy
+    .transcribe(Mic.peek())
+    .then((t) => {
+      if (barge !== b) return;
+      barge = null;
+      if (meaningful(t)) stopSpeaking();
+      else duckVoice(false);
+    })
+    .catch(() => {
+      if (barge === b) duckVoice(false);
+    });
+}
+
+function bargeEnd() {
+  // A short sound that never reached the check: a cough or a click. Carry on.
+  if (barge && !barge.checking) {
+    barge = null;
+    duckVoice(false);
+  }
+}
+
 function updateMic() {
   // Typed mode (npm run text) never opens the microphone.
   const want = !state.micOff && (state.teaching || state.executing || Boolean(state.answering) || Boolean(state.listening) || state.wakeEnabled || (state.canHear && (state.guiding || convoOpen())));
   if (want && !Mic.isOn()) {
     Mic.start({
       // Quick requests end sooner; answers and narration allow slow, thoughtful speech.
-      silenceMs: () => (state.listening ? 1100 : 1600),
+      // Once it's heard its name, the end of the request comes quicker too.
+      silenceMs: () => (state.listening || state.wakingUntil > Date.now() ? 1100 : 1600),
       // Short answers ("no", "yep") are fine; anything shorter is a cough or a click.
       minSpeechMs: () => (state.listening ? 200 : state.answering ? 320 : 450),
       gain: () => (buddyEl.classList.contains('talking') ? 2.5 : 1),
       onStart: () => {
-        // You started talking: the buddy stops and listens.
-        if (buddyEl.classList.contains('talking')) stopSpeaking();
+        // You might be talking over it: dip its voice until we know it's words.
+        bargeStart();
         clearTimeout(autoSendTimer);
         clearTimeout(listenTimeout);
         buddyEl.classList.add('hearing');
         window.buddy.teachSpeaking(true);
       },
+      onProgress: bargeProgress,
       onEnd: () => {
+        bargeEnd();
         buddyEl.classList.remove('hearing');
         window.buddy.teachSpeaking(false);
         if (state.listening) armListenTimeout(6000);
@@ -1376,6 +1428,7 @@ function startListening(mode) {
     return;
   }
   if (state.answering || state.busy) return;
+  if (mode === 'ask') window.buddy.prepare(); // read the screen while they talk
   if (state.executing) {
     showCaption('Jarvis is working. Say "stop" or press Esc to stop him.');
     return;
@@ -1564,6 +1617,18 @@ window.buddy.on('config', (c) => {
   setWake({ enabled: c.wakeEnabled, wakeWord: c.wakeWord });
 });
 window.buddy.on('wake', setWake);
+// What it pointed at moved, or went away (see trackPointed in main.js).
+window.buddy.on('repoint', ({ rect, label }) => {
+  if (!state.pointerAt || state.guiding || state.executing) return;
+  if (state.pointerMode === 'ring') {
+    showSpot(rect, label);
+    state.pointerAt = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+    goHomeLater();
+  } else queueGuide(() => pointTo(rect, label)).then(() => goHomeLater());
+});
+window.buddy.on('unpoint', () => {
+  if (state.pointerAt && !state.guiding && !state.executing) queueGuide(goHome);
+});
 window.buddy.on('mac-audio', ({ playing }) => {
   state.macAudio = Boolean(playing);
 });

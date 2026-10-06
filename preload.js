@@ -21,8 +21,10 @@ contextBridge.exposeInMainWorld('buddy', {
   teachSpeaking: (on) => ipcRenderer.send('teach-speaking', on),
   transcribe: (wav) => ipcRenderer.invoke('transcribe', wav),
   openHub: () => ipcRenderer.send('open-hub'),
+  // Heard its name: start reading the screen while they finish the sentence.
+  prepare: () => ipcRenderer.send('prepare'),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio', 'repoint', 'unpoint'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

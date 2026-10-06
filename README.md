@@ -197,6 +197,15 @@ top centre on every screen.
   echo cancellation FaceTime uses), so a video or song isn't heard as speech; the terminal says at
   startup whether that's available. As a backstop, while another app is playing sound, only speech
   that starts with "Hey Friday" or "Hey Jarvis" counts as talking to them.
+- **Interrupting has to mean it.** Talk over them and their voice dips; if it's real words they
+  stop and listen, but a cough, a sneeze, a laugh or an "um" just lets them carry on.
+- **It keeps up with the screen.** After pointing at something, the highlight follows it if the page
+  scrolls or the window moves, and goes away if it disappears or you switch windows. In a lesson,
+  if you've already done a step (however you did it, even while she's still explaining it), she
+  notices what the next step needs on screen and moves on.
+- **It gets ready while you talk.** The moment it hears its name it starts reading the screen and
+  taking the screenshot, so the answer starts as soon as you finish (only reused if the screen
+  hasn't changed; it costs no tokens).
 - **Nothing is sent without a yes.** Pressing Return in a message or form field counts as
   sending, so Jarvis shows exactly what will go ("Ready to send "See you at 6" from "Message".
   Send it?") first. Search and address bars are exempt.
