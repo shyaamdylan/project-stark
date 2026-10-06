@@ -821,6 +821,12 @@ async function showGuideStep(step) {
   buddyEl.classList.remove('thinking');
 
   nextBtn.disabled = false;
+  // What she was pointing at has gone: bring the pointer home quietly. It comes
+  // back on its own when the thing is on screen again.
+  if (step.retract) {
+    await goHome();
+    return;
+  }
   if (step.status === 'step') {
     guideCount.textContent = step.totalSteps ? `Step ${step.stepNo} of ${step.totalSteps}` : `Step ${step.stepNo}`;
     guideBar.classList.remove('hidden');

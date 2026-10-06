@@ -219,8 +219,10 @@ top centre on every screen.
   sound only counts as speech when it fills most of each moment (`renderer/voice-detect.js`).
 - **Interrupting has to mean it.** Talk over them and their voice dips; if it's real words they
   stop and listen, but a cough, a sneeze, a laugh or an "um" just lets them carry on.
-- **It keeps up with the screen.** After pointing at something, the highlight follows it if the page
-  scrolls or the window moves, and goes away if it disappears or you switch windows. In a lesson,
+- **It keeps up with the screen.** Whatever it points at, the pointer moves with the page when you
+  scroll or drag the window (it works out how the whole screen shifted, so it never jumps to a
+  different button with the same name), and goes home if the thing disappears or you switch to
+  another window. In a lesson it comes back when the thing is on screen again. In a lesson,
   if you've already done a step (however you did it, even while she's still explaining it), she
   notices what the next step needs on screen and moves on.
 - **It gets ready while you talk.** The moment it hears its name it starts reading the screen and

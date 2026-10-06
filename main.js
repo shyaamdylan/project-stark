@@ -63,7 +63,7 @@ const { findNotches, overlayLayout } = require('./src/notch');
 const { checkOtherAudio } = require('./src/macaudio');
 const { makeStationary } = require('./src/stationary');
 const { avoid } = require('./src/avoid');
-const { relocate, anchorFor, followAnchor, moved } = require('./src/track');
+const { follow, moved } = require('./src/track');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
 
@@ -398,8 +398,8 @@ function trackPointed(res) {
   const t = {
     rect: { x: res.rect.x + b.x, y: res.rect.y + b.y, w: res.rect.w, h: res.rect.h, label: res.label },
     label: res.label,
-    picture: res.role === 'part', // a box on a screenshot: follow a named neighbour
-    anchor: null,
+    picture: res.role === 'part', // a box on a screenshot: it moves with the screen
+    prev: null, // the last scan's elements, to see how the screen moved
     key: lastScreenKey,
     until: Date.now() + TRACK_MS,
     busy: false,
@@ -415,21 +415,21 @@ async function trackTick(t) {
   try {
     const s = await scanFrontWindow();
     if (tracking !== t || !s || s.error) return;
-    if (t.picture && !t.anchor) {
-      t.anchor = anchorFor(t.rect, s.elements);
-      if (!t.anchor) return stopTracking(); // nothing to follow it by: leave it be
-      return;
-    }
-    const now = `${s.app}|${s.window || ''}` === t.key ? (t.picture ? followAnchor(t.rect, t.anchor, s.elements) : relocate(t.rect, t.label, s.elements)) : null;
+    // They've gone to another window: the pointing no longer applies, so it goes home.
+    const left = `${s.app}|${s.window || ''}` !== t.key;
+    // Otherwise follow it by how the screen moved (a scroll, the window dragged),
+    // and only if it's really where that movement puts it (src/track.js).
+    const first = !t.prev;
+    const now = left ? null : first && t.picture ? t.rect : follow(t.rect, t.picture ? '' : t.label, t.prev, s.elements);
+    t.prev = s.elements;
     if (!now) {
-      console.log(`[track] "${t.label}" is gone: taking the highlight away`);
+      console.log(`[track] "${t.label}" ${left ? 'is in a window they left' : 'is gone'}: taking the highlight away`);
       stopTracking();
       if (win) win.webContents.send('unpoint');
       return;
     }
     if (moved(now, t.rect)) {
       t.rect = { ...t.rect, x: now.x, y: now.y, w: now.w, h: now.h };
-      if (t.anchor) t.anchor = { ...t.anchor, x: now.x - t.anchor.dx, y: now.y - t.anchor.dy };
       if (win) win.webContents.send('repoint', { rect: toLocal(t.rect), label: t.label });
     }
   } catch {
@@ -888,6 +888,7 @@ function stepPayload(step) {
     quietMove: Boolean(step.quietMove),
     chat: Boolean(step.chat), // the tutor talking (an answer, a check-in): the cursor stays put
     flagged: Boolean(step.flagged), // a decision she stopped: the field gets the warning highlight
+    retract: Boolean(step.retract), // what she pointed at is gone (they left, or scrolled it away): pointer home
     stepNo: step.stepNumber || 0,
     totalSteps: step.totalSteps || 0,
     label: step.target ? step.target.label : null,

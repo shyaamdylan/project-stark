@@ -277,10 +277,33 @@ test('a different record on screen than when it was worked out: it asks afresh',
   r.index = 3;
   r.point();
   await new Promise((resolve) => setTimeout(resolve, 5));
-  r.onScan(scanOf('Bill B', [cost('4720')]));
+  r.onScan(scanOf('Bill B', [cost('4720')])); // another record: the pointer goes home…
+  assert.equal(r.target, null);
+  r.onScan(scanOf('Bill B', [cost('4720')])); // …and finds the field again
+  r.onScan(scanOf('Bill B', [cost('4730')]));
   r.editSeenAt -= 2000;
-  r.onScan(scanOf('Bill B', [cost('4720')]));
+  r.onScan(scanOf('Bill B', [cost('4730')]));
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(judged, 1);
   assert.equal(emitted.at(-1).status, 'done');
+});
+
+test('in a lesson the pointer follows a scroll, goes home when the thing scrolls away or they leave, and comes back', () => {
+  const { r, emitted } = makeReplay([scanOf('Bills', [file, newFolder])]);
+  r.index = 1; // "click File"
+  r.point();
+  // A small scroll: everything moved up 40.
+  r.onScan(scanOf('Bills', [{ ...file, y: file.y - 40 }, { ...newFolder, y: newFolder.y - 40 }]));
+  assert.equal(emitted.at(-1).target.y, file.y - 40);
+  // They switched to another window: pointer home.
+  r.onScan(scanOf('Mail', []));
+  assert.equal(emitted.at(-1).retract, true);
+  assert.equal(r.target, null);
+  // Back again: it's found and pointed at again.
+  r.onScan(scanOf('Bills', [file, newFolder]));
+  assert.equal(emitted.at(-1).target.label, 'File');
+  const count = emitted.length;
+  r.onScan(scanOf('Bills', [file, newFolder])); // and it stays put
+  assert.equal(emitted.length, count);
+  assert.equal(r.index, 1);
 });

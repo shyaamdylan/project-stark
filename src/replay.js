@@ -14,6 +14,7 @@
 // thing to click shows up. If they're already there it's skipped.
 
 const { findBest, normalize } = require('./matcher');
+const { follow } = require('./track');
 
 const RETRY_MS = 2500; // how long to keep looking for a target before asking Claude
 const SETTLE_MS = 900; // a field must stop changing this long to count as filled in
@@ -374,6 +375,7 @@ class Replay {
   }
 
   onScan(s) {
+    const prev = this.latest;
     this.latest = s;
     if (!this.running || this.recovering || this.judging || !this.action) return;
     const a = this.action;
@@ -399,10 +401,23 @@ class Replay {
       }
     }
 
-    // The thing being pointed at moved (a scroll, the window dragged): follow it.
+    // Keep the pointer honest as the screen changes (src/track.js): a scroll or
+    // a dragged window moves it with the thing; if the thing is gone (they left
+    // the window, or scrolled it away) the pointer goes home, and it comes back
+    // when the thing does (the waiting branch below finds it again).
     if (this.target && a.label && (a.kind === 'click' || a.kind === 'edit')) {
-      const now = locate(a, s.elements);
-      if (now && (Math.abs(now.x - this.target.x) > MOVED_PX || Math.abs(now.y - this.target.y) > MOVED_PX || Math.abs(now.w - this.target.w) > MOVED_PX)) {
+      const left = this.view && view !== this.view;
+      const now = left ? null : follow(this.target, a.label, prev && prev.elements, s.elements);
+      if (!now) {
+        this.target = null;
+        this.editSeenAt = 0;
+        // Doing something else for a while: don't ask where they are straight away.
+        this.lostSince = Date.now() + (left ? 15000 : 3000);
+        this.view = view;
+        this.emit({ status: 'step', say: '', note: '', target: null, stepNumber: a.stepIndex + 1, totalSteps: this.total, quietMove: true, retract: true });
+        return;
+      }
+      if (Math.abs(now.x - this.target.x) > MOVED_PX || Math.abs(now.y - this.target.y) > MOVED_PX || Math.abs(now.w - this.target.w) > MOVED_PX) {
         this.target = a.kind === 'edit' ? { ...now, value: this.target.value } : now;
         this.emit({ status: 'step', say: '', note: '', target: now, stepNumber: a.stepIndex + 1, totalSteps: this.total, quietMove: true });
       }
@@ -421,6 +436,7 @@ class Replay {
         this.target = found;
         this.baseValue = found.value;
         this.lostSince = 0;
+        this.view = view; // where it's been found is where they are now
         this.emit({ status: 'step', say: '', note: '', target: found, stepNumber: a.stepIndex + 1, totalSteps: this.total, quietMove: true });
         return;
       }
