@@ -14,7 +14,7 @@
 // steps you've chosen not to do, check in, or carry on with the plan.
 
 const { Anthropic } = require('@anthropic-ai/sdk');
-const { Replay } = require('./replay');
+const { Replay, locate } = require('./replay');
 const { describeScreen, describeSkill } = require('./guide');
 const { ScreenObserver } = require('./observe');
 const { imageBlock, boxToScreen, screenshotNote, POINT_SCHEMA } = require('./vision');
@@ -84,6 +84,26 @@ const JUDGE_SCHEMA = {
   additionalProperties: false,
 };
 
+// Worked out as soon as a decision step comes up, so checking what they fill
+// in is instant: what the expert's reasoning says belongs in the field for the
+// record on screen, and what to say if they put something else.
+const EXPECT_SYSTEM = `You are Friday, a warm, sharp teacher on someone's Mac, teaching a task an expert showed you. The learner has just reached a step where the expert used judgment or where there are guardrails, and is about to fill in a field. Before they do, work out what the expert's reasoning says belongs in it for the case in front of them now, which may differ from the expert's own case.
+
+You get the step (what to do, the expert's decision in their case, the expert's reason in their own words, any rule and guardrails), the field, what it holds now, and their screen: a screenshot and the accessibility list. Read the case's details off the screen (amounts, item types, names, dates, flags).
+
+- expected: the exact values the expert's reasoning allows here, as they'd be typed (a code, a number, an option's name). [] when the screen doesn't show enough to be sure, or the field is free text. Never guess.
+- say_if_wrong: what you'd say out loud if they enter anything else, in two or three short sentences: stop them before they move on or save ("Hold on, the expert would stop here."), explain why using the expert's own reasoning applied to what's on screen now, and ask them to change it. "" if expected is [].`;
+
+const EXPECT_SCHEMA = {
+  type: 'object',
+  properties: {
+    expected: { type: 'array', items: { type: 'string' } },
+    say_if_wrong: { type: 'string' },
+  },
+  required: ['expected', 'say_if_wrong'],
+  additionalProperties: false,
+};
+
 const TRIGGERS = {
   said: (d) => `They said: "${d}"`,
   'off-path': (d) => `They did something other than the current instruction (${d}).`,
@@ -100,13 +120,9 @@ class Tutor {
     this.notes = []; // things that happened outside a turn (a decision she stopped), told on the next one
   }
 
-  // Is the decision they filled in right for this case? ctx: { stepNumber,
-  // label, value, expertValue, scan, image, where }. Returns { ok, say, target }.
-  async judge(ctx) {
-    const step = this.skill.map.steps[ctx.stepNumber - 1];
-    if (!step) return { ok: true, say: '', target: null };
-    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
-    const lines = [
+  // The facts about a decision step, for judge() and expect().
+  stepFacts(step, ctx, screen) {
+    return [
       `Task: ${this.skill.map.title}${this.skill.map.summary ? ` (${this.skill.map.summary})` : ''}`,
       `Step ${ctx.stepNumber}: ${step.title}`,
       `Do: ${step.action}`,
@@ -115,11 +131,44 @@ class Tutor {
       step.reason ? `The expert's reason, in their words: "${step.reason}"` : '',
       step.rule ? `Rule: ${step.rule}` : '',
       ...(step.guardrails || []).map((g) => `Guardrail (${g.kind.replace(/_/g, ' ')}): ${g.text}`),
-      `The learner entered "${ctx.value}" in "${ctx.label}".`,
       `Where they are: ${ctx.where || 'unknown'}`,
       `On screen now:\n${screen.text || '(nothing readable)'}`,
     ].filter(Boolean);
-    const text = lines.join('\n');
+  }
+
+  // Before they fill in a decision: what belongs there for the case on screen,
+  // and what to say if they put something else. ctx: { stepNumber, label,
+  // value (what it holds now), expertValue, scan, image, where }.
+  async expect(ctx) {
+    const step = this.skill.map.steps[ctx.stepNumber - 1];
+    if (!step) return { expected: [], sayIfWrong: '' };
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const text = [...this.stepFacts(step, ctx, screen), `The field: "${ctx.label}", holding "${ctx.value || ''}" now.`].join('\n');
+    const response = await this.client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 1200,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: EXPECT_SCHEMA } },
+      system: [{ type: 'text', text: EXPECT_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: ctx.image ? [imageBlock(ctx.image), { type: 'text', text: `${screenshotNote(ctx.image)}\n${text}` }] : text }],
+    });
+    try {
+      const r = JSON.parse(response.content.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      const expected = Array.isArray(r.expected) ? r.expected.map(String).filter((v) => v.trim()) : [];
+      return { expected, sayIfWrong: expected.length ? String(r.say_if_wrong || '') : '' };
+    } catch {
+      return { expected: [], sayIfWrong: '' };
+    }
+  }
+
+  // Is the decision they filled in right for this case? ctx: { stepNumber,
+  // label, value, expertValue, scan, image, where }. Returns { ok, say, target }.
+  async judge(ctx) {
+    const step = this.skill.map.steps[ctx.stepNumber - 1];
+    if (!step) return { ok: true, say: '', target: null };
+    const screen = describeScreen((ctx.scan && ctx.scan.elements) || []);
+    const text = [...this.stepFacts(step, ctx, screen), `The learner entered "${ctx.value}" in "${ctx.label}".`].join('\n');
     const response = await this.client.beta.messages.create({
       model: MODEL,
       max_tokens: 1500,
@@ -253,11 +302,29 @@ class Lesson {
     });
     this.replay.onOffPath = (why) => this.schedule('off-path', why, this.offPathDelayMs);
     if (tutor && typeof tutor.judge === 'function') this.replay.judge = (a, field, s) => this.judgeStep(a, field, s);
+    if (tutor && typeof tutor.expect === 'function') this.replay.expect = (a, s) => this.expectStep(a, s);
     this.replay.onLost = (why) => this.schedule('lost', why, 0);
   }
 
   get total() {
     return this.replay.total;
+  }
+
+  // As a decision step comes up: work out what belongs in it, in the background.
+  async expectStep(a, s) {
+    const field = locate(a, s.elements);
+    const image = await this.snap(s).catch(() => null);
+    const r = await this.tutor.expect({
+      stepNumber: a.stepIndex + 1,
+      label: (field && field.label) || a.label,
+      value: field && field.value != null ? String(field.value) : '',
+      expertValue: a.value,
+      scan: s,
+      image,
+      where: this.observer.where(),
+    });
+    console.log(`[lesson] step ${a.stepIndex + 1}: expecting ${r.expected.length ? r.expected.map((v) => `"${v}"`).join(' or ') : 'nothing definite (will check when filled in)'}`);
+    return r;
   }
 
   // A decision they filled in, checked against the expert's reasoning for the

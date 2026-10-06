@@ -130,7 +130,9 @@ sitting next to you rather than a click-through tutorial:
   guardrail, what you fill in is checked against the expert's reasoning for the case on your
   screen before she moves on. Code a €7,200 equipment invoice to opex and she stops you: "Hold
   on, the expert would stop here. Equipment over €5,000 is always capex." Change it and she
-  checks again.
+  checks again. She works out what belongs in the field as soon as the step comes up (while you're
+  still reading), so the check when you fill it in, or click away towards Save, is instant, and the
+  field gets an amber "Check this" ring.
 - **She notices you've moved on.** Clicking what a later step needs, or moving into a later step's
   field, moves the lesson there at once. **Done ✓** (or just saying "done") marks a step done; a
   decision is checked first. If you go quiet she checks in after about 12 seconds.

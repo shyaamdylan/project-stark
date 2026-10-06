@@ -887,6 +887,7 @@ function stepPayload(step) {
     note: step.note || '',
     quietMove: Boolean(step.quietMove),
     chat: Boolean(step.chat), // the tutor talking (an answer, a check-in): the cursor stays put
+    flagged: Boolean(step.flagged), // a decision she stopped: the field gets the warning highlight
     stepNo: step.stepNumber || 0,
     totalSteps: step.totalSteps || 0,
     label: step.target ? step.target.label : null,

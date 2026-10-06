@@ -385,7 +385,9 @@ function pointStyleNow() {
   return state.pointerAt ? 'highlight' : 'arrive';
 }
 
-async function pointTo(rect, label, taps = 3) {
+// warn: a decision she's stopped them on; the ring turns amber and says "Check this".
+async function pointTo(rect, label, taps = 3, { warn = false } = {}) {
+  state.spotWarn = warn;
   clearTimeout(homeTimer);
   if (homing) await homing; // already on its way back: let it land, then go out again
   const center = { x: rect.x + rect.w / 2, y: Math.max(4, rect.y + rect.h / 2) };
@@ -479,7 +481,8 @@ function showSpot(rect, label) {
   spot.style.width = `${rect.w + pad * 2}px`;
   spot.style.height = `${Math.max(10, rect.y + rect.h + pad - top)}px`;
   spot.classList.toggle('above', rect.y > window.innerHeight - 120);
-  spotLabel.textContent = label;
+  spotLabel.textContent = state.spotWarn ? 'Check this' : label;
+  spot.classList.toggle('warn', Boolean(state.spotWarn));
   spot.classList.remove('hidden');
 }
 
@@ -827,7 +830,7 @@ async function showGuideStep(step) {
       guideNote.textContent = step.note || '';
       guideNote.classList.toggle('hidden', !step.note);
     }
-    if (step.rect) await pointTo(step.rect, step.label, Infinity);
+    if (step.rect) await pointTo(step.rect, step.label, Infinity, { warn: step.flagged });
     // An answer or a check-in leaves the cursor on what they're meant to do.
     else if (!step.quietMove && !step.chat) await goHome();
     return;

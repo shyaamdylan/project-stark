@@ -174,6 +174,12 @@ class Replay {
     //   them? Until it says ok, the lesson doesn't move on.
     this.judge = null;
     this.judging = false;
+    //   expect(action, scan) -> { expected: [values], sayIfWrong }: worked out
+    //   in the background as soon as a decision step comes up, so the check
+    //   when they fill it in is instant. Used only while the screen still
+    //   shows the same thing (the same record); otherwise judge() decides.
+    this.expect = null;
+    this.expectation = null; // { index, view, promise, result }
   }
 
   // Steps where what's entered is a decision, not just a click: the expert's
@@ -183,14 +189,41 @@ class Replay {
     return Boolean(step && (step.is_judgment || (step.guardrails || []).length));
   }
 
+  // Work out, in the background, what the expert's reasoning says belongs in
+  // this decision's field for the record on screen.
+  prepareExpectation(a) {
+    if (!this.expect || !this.latest || a.kind !== 'edit' || !this.needsJudging(a)) return;
+    const exp = { index: this.index, view: this.viewOf(this.latest), result: null };
+    exp.promise = Promise.resolve(this.expect(a, this.latest))
+      .then((r) => (exp.result = r || { expected: [] }))
+      .catch(() => (exp.result = { expected: [] }));
+    this.expectation = exp;
+  }
+
+  // The verdict from the expectation, if it applies and is ready within a
+  // moment; null to ask judge() instead.
+  async quickVerdict(field, s) {
+    const exp = this.expectation;
+    if (!exp || exp.index !== this.index || exp.view !== this.viewOf(s)) return null;
+    const r = exp.result || (await Promise.race([exp.promise, new Promise((resolve) => setTimeout(() => resolve(null), 2500))]));
+    if (!r || !Array.isArray(r.expected) || !r.expected.length) return null;
+    const norm = (v) => String(v == null ? '' : v).toLowerCase().replace(/[\s._-]/g, '').replace(/^0+(?=\d)/, '');
+    if (r.expected.some((v) => norm(v) === norm(field.value))) return { ok: true, say: '' };
+    return r.sayIfWrong ? { ok: false, say: r.sayIfWrong } : null;
+  }
+
   // Check a filled-in decision before moving on. Wrong for this case: say why
   // (in the expert's reasoning) and wait for them to change it, then check again.
   async checkJudgment(a, field, s) {
     this.judging = true;
-    this.thinking();
     let verdict = { ok: true, say: '' };
     try {
-      verdict = (await this.judge(a, field, s)) || verdict;
+      const quick = await this.quickVerdict(field, s);
+      if (quick) verdict = quick;
+      else {
+        this.thinking();
+        verdict = (await this.judge(a, field, s)) || verdict;
+      }
     } catch (err) {
       console.error('[replay] judgment check', err.message);
     } finally {
@@ -274,6 +307,7 @@ class Replay {
     this.view = this.latest ? this.viewOf(this.latest) : null;
     this.lostSince = this.target || !a.label || a.kind === 'any-click' ? 0 : Date.now();
     this.aheadAtStart = new Set(this.upcoming().filter((i) => this.latest && locate(this.actions[i], this.latest.elements)));
+    this.prepareExpectation(a);
     // What later fields hold now, so typing in one counts as having moved on.
     this.aheadValues = new Map(
       this.upcoming()
@@ -404,7 +438,9 @@ class Replay {
 
     if (a.kind === 'edit' && this.target) {
       const field = locate(a, s.elements);
-      if (field && field.value !== this.baseValue) {
+      // Any change counts, even typing the same value back in (retyping what
+      // was already there is still a decision to check).
+      if (field && (field.value !== this.baseValue || this.editSeenAt)) {
         if (field.value !== this.target.value) {
           this.target = field;
           this.editSeenAt = Date.now();
@@ -423,8 +459,14 @@ class Replay {
   onMouseDown(x, y) {
     if (!this.running || this.recovering || this.judging || !this.action) return;
     const a = this.action;
-    // Clicked what a later step needs: they're already there. (Not past a
-    // decision they haven't filled in yet, which the check below catches.)
+    // Clicking away from a decision (on the way to Save or Send): check what's
+    // in it now, before they move on. With the expectation ready it's instant.
+    if (a.kind === 'edit' && this.judge && this.needsJudging(a) && this.latest) {
+      const field = locate(a, this.latest.elements);
+      if (field && !inside(x, y, field)) return this.checkJudgment(a, field, this.latest);
+      return;
+    }
+    // Clicked what a later step needs: they're already there.
     if (this.latest && !(a.kind === 'edit' && this.judge && this.needsJudging(a))) {
       for (const i of this.upcoming()) {
         const later = this.actions[i];

@@ -230,3 +230,57 @@ test('"Done" on a decision checks it first; on anything else it just moves on', 
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(r.index, 2);
 });
+
+test('with the answer worked out ahead, a wrong decision is stopped instantly, without asking again', async () => {
+  const { r, emitted } = makeReplay([scanOf('Bill', [cost('4711')])]);
+  let judged = 0;
+  r.judge = async () => (judged++, { ok: true });
+  r.expect = async () => ({ expected: ['0400'], sayIfWrong: 'Hold on, the expert would stop here.' });
+  r.index = 3;
+  r.point();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  // Typed the same thing that was already there: still a decision to check.
+  r.onScan(scanOf('Bill', [cost('')]));
+  r.onScan(scanOf('Bill', [cost('4711')]));
+  r.editSeenAt -= 2000;
+  r.onScan(scanOf('Bill', [cost('4711')]));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(judged, 0, 'no second call');
+  assert.equal(emitted.at(-1).flagged, true);
+  assert.match(emitted.at(-1).say, /would stop here/);
+  // "400" is the same code as "0400".
+  r.onScan(scanOf('Bill', [cost('400')]));
+  r.editSeenAt -= 2000;
+  r.onScan(scanOf('Bill', [cost('400')]));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(emitted.at(-1).status, 'done');
+});
+
+test('clicking away from an unchecked decision (on the way to Send) checks it there and then', async () => {
+  const { r, emitted } = makeReplay([scanOf('Bill', [cost('4711')])]);
+  r.judge = async () => ({ ok: true });
+  r.expect = async () => ({ expected: ['0400'], sayIfWrong: 'Hold on.' });
+  r.index = 3;
+  r.point();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  r.onMouseDown(900, 700); // somewhere else, e.g. the Send button
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(emitted.at(-1).flagged, true);
+  assert.equal(r.index, 3);
+});
+
+test('a different record on screen than when it was worked out: it asks afresh', async () => {
+  const { r, emitted } = makeReplay([scanOf('Bill A', [cost('4711')])]);
+  let judged = 0;
+  r.judge = async () => (judged++, { ok: true });
+  r.expect = async () => ({ expected: ['0400'], sayIfWrong: 'Hold on.' });
+  r.index = 3;
+  r.point();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  r.onScan(scanOf('Bill B', [cost('4720')]));
+  r.editSeenAt -= 2000;
+  r.onScan(scanOf('Bill B', [cost('4720')]));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(judged, 1);
+  assert.equal(emitted.at(-1).status, 'done');
+});
