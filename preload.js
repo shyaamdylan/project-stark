@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('buddy', {
   // Heard its name: start reading the screen while they finish the sentence.
   prepare: () => ipcRenderer.send('prepare'),
   on: (channel, fn) => {
-    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio', 'repoint', 'unpoint'];
+    const allowed = ['cursor', 'open-prompt', 'say', 'config', 'relocated', 'guide-step', 'guide-thinking', 'teach-state', 'teach-question', 'teach-status', 'listen', 'wake', 'agent', 'jarvis-step', 'jarvis-state', 'question-cancel', 'layout', 'mac-audio', 'repoint', 'unpoint', 'show-result'];
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_e, data) => fn(data));
   },
 });

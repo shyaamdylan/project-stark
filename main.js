@@ -1879,13 +1879,20 @@ function openHub(selectId) {
   }
   hub = new BrowserWindow({
     width: 1180,
-    height: 800,
-    minWidth: 760,
-    minHeight: 500,
+    height: 780,
+    minWidth: 820,
+    minHeight: 520,
     title: 'Skills',
+    // A Mac app window: traffic lights inset over a translucent sidebar.
     titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
+    vibrancy: 'sidebar',
+    visualEffectState: 'followWindow',
+    backgroundColor: '#00000000',
+    show: false,
     webPreferences: { preload: path.join(__dirname, 'hub-preload.js'), contextIsolation: true, nodeIntegration: false },
   });
+  hub.once('ready-to-show', () => hub.show());
   if (process.platform === 'darwin' && app.dock) app.dock.show();
   hub.loadFile(path.join(__dirname, 'renderer', 'hub', 'hub.html'));
   if (selectId) hub.webContents.once('did-finish-load', () => hub.webContents.send('hub-changed', selectId));
@@ -1896,6 +1903,57 @@ function openHub(selectId) {
 }
 
 ipcMain.handle('hub-list', () => listSkills());
+// Everything the hub shows for one skill: its Work Map, and from the session
+// only what the map refers to (events with their screen moments, the Q&A).
+ipcMain.handle('hub-skill', (_e, id) => {
+  const dir = skillDir(id);
+  const map = dir && readJson(path.join(dir, 'workmap.json'));
+  if (!map) return null;
+  const sess = readJson(path.join(dir, 'session.json')) || { events: [], qas: [] };
+  const frameUrl = (f) => {
+    if (!f || !f.file) return null;
+    const file = path.resolve(dir, f.file);
+    return file.startsWith(dir + path.sep) && fs.existsSync(file) ? pathToFileURL(file).href : null;
+  };
+  return {
+    id: path.basename(dir),
+    map,
+    startedAt: sess.startedAt || null,
+    events: (sess.events || []).map((e) => ({ id: e.id, t: e.t, type: e.type, label: e.label, text: e.text, from: e.from, to: e.to, role: e.role, keys: e.keys, app: e.app, window: e.window, rect: e.rect, frame: e.frame ? { url: frameUrl(e.frame), display: e.frame.display } : null })),
+    qas: sess.qas || [],
+  };
+});
+// "Teach me": Friday walks you through it on your own screen.
+ipcMain.on('hub-learn', async (_e, id) => {
+  if (teach) return;
+  setAgent('friday');
+  if (hub && !hub.isDestroyed()) hub.minimize();
+  await refocusFrontApp();
+  stopGuide();
+  stopJarvis('new-request');
+  const res = await beginSkill(path.basename(String(id)));
+  if (win) win.webContents.send('show-result', res);
+});
+// "Export for agents": the steps and guardrails as instructions an agent can follow.
+ipcMain.handle('hub-export', async (_e, id) => {
+  const dir = skillDir(id);
+  const map = dir && readJson(path.join(dir, 'workmap.json'));
+  if (!map) return null;
+  const KIND = { limit: 'Limit', exception: 'Exception', stop_and_ask: 'Stop and ask' };
+  const lines = [`# ${map.title}`, '', map.summary || '', '', '## Steps', ''];
+  map.steps.forEach((st, i) => {
+    lines.push(`${i + 1}. **${st.title}**: ${st.action}`);
+    if (st.is_judgment && st.decision) lines.push(`   - Decision: ${st.decision}`);
+    if (st.reason) lines.push(`   - Why (the expert's words): "${st.reason}"`);
+    if (st.rule) lines.push(`   - Rule: ${st.rule}`);
+    for (const g of st.guardrails || []) lines.push(`   - ${KIND[g.kind] || g.kind}: ${g.text}`);
+  });
+  lines.push('', '## Always', '', '- Where a step says "Stop and ask", stop and ask a person before going on.', '- Never type passwords or codes.');
+  const file = path.join(dir, 'agent-instructions.md');
+  fs.writeFileSync(file, lines.join('\n'));
+  shell.showItemInFolder(file);
+  return file;
+});
 ipcMain.handle('hub-delete', async (_e, id) => {
   const dir = skillDir(id);
   if (dir) await shell.trashItem(dir);

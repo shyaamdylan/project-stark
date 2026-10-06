@@ -2,41 +2,106 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src file:; img-src 'self' data: file:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:" />
     <title>Skills</title>
     <link rel="stylesheet" href="hub.css" />
   </head>
   <body>
-    <aside>
-      <div class="drag"></div>
-      <div class="brand"><span class="dot"></span>Skills</div>
-      <button id="teach" class="primary">＋ Teach a new skill</button>
-      <input id="search" type="search" placeholder="Search skills" />
-      <ul id="list"></ul>
-    </aside>
-    <main>
-      <div class="drag"></div>
-      <div id="empty" class="empty hidden">
-        <div class="orb"></div>
-        <h2>No skills yet</h2>
-        <p>Teach it something: press <b>Teach a new skill</b>, then just do the task while it watches. Talk it through as you go if you like.</p>
+    <!-- Sidebar: translucent (macOS vibrancy), traffic lights inset at the top. -->
+    <aside id="sidebar">
+      <div class="side-top drag">
+        <button id="teach" class="icon-btn no-drag" title="Teach a new skill (Friday watches while you do it)" aria-label="Teach a new skill">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13.6 3.2a1.8 1.8 0 0 1 2.6 2.6l-7.9 7.9-3.4.8.8-3.4 7.9-7.9Z" /><path d="M4 16.5h12" /></svg>
+        </button>
       </div>
-      <div id="viewer" class="hidden">
-        <header>
-          <div>
+      <div class="search-wrap">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="m13.2 13.2 3.3 3.3" /></svg>
+        <input id="search" type="search" placeholder="Search" spellcheck="false" />
+      </div>
+      <nav id="list" aria-label="Skills"></nav>
+      <div class="side-foot">
+        <span class="mini-orb"></span>
+        <div>
+          <div class="foot-title">Friday &amp; Jarvis</div>
+          <div class="foot-sub" id="count">No skills yet</div>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="topbar drag">
+        <div class="top-title" id="top-title"></div>
+        <div class="top-actions no-drag hidden" id="actions">
+          <button id="learn" class="btn" title="Friday walks you through it on your own screen">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6.5 10 3l7 3.5-7 3.5-7-3.5Z" /><path d="M6 8.2v4.1c0 1.1 1.8 2.2 4 2.2s4-1.1 4-2.2V8.2" /></svg>
+            Teach me
+          </button>
+          <button id="run" class="btn primary jarvis" title="Jarvis does it for you, asking for anything he needs">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4.5v11l9-5.5-9-5.5Z" /></svg>
+            Do it for me
+          </button>
+          <div class="menu-wrap">
+            <button id="more" class="icon-btn" aria-haspopup="true" aria-expanded="false" aria-label="More">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="10" r="1.3" /><circle cx="10" cy="10" r="1.3" /><circle cx="15" cy="10" r="1.3" /></svg>
+            </button>
+            <div id="menu" class="menu hidden" role="menu">
+              <button role="menuitem" id="export">Export for agents…</button>
+              <button role="menuitem" id="open">Open as web page</button>
+              <button role="menuitem" id="reveal">Show in Finder</button>
+              <div class="sep"></div>
+              <button role="menuitem" id="delete" class="danger">Move to Trash</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="scroll">
+        <!-- Nothing learned yet: what the apprentice does, in three steps. -->
+        <section id="empty" class="empty hidden">
+          <div class="orb"></div>
+          <h1>Teach Friday something you do</h1>
+          <p class="lede">Do a real task while she watches. She asks why at the natural pauses, checks what she understood, and turns it into a Work Map anyone can follow.</p>
+          <div class="how">
+            <div class="how-card"><span class="how-n">1</span><b>Capture</b><span>Work as usual and talk it through. She stays quiet while you type and asks at the pauses.</span></div>
+            <div class="how-card"><span class="how-n">2</span><b>Map</b><span>A short debrief fills the gaps, then she explains it back until you say that's right.</span></div>
+            <div class="how-card"><span class="how-n">3</span><b>Teach</b><span>She coaches the next person on their own screen, in your words, and stops them at the guardrails.</span></div>
+          </div>
+          <button id="teach-empty" class="btn primary big">Teach a new skill</button>
+        </section>
+
+        <article id="skill" class="hidden">
+          <header class="skill-head">
+            <div class="eyebrow">Work Map</div>
             <h1 id="title"></h1>
-            <div id="meta"></div>
-          </div>
-          <div class="actions">
-            <button id="run" class="jarvis" title="Jarvis does the task for you, asking for anything he needs">Have Jarvis do it</button>
-            <button id="open">Open in browser</button>
-            <button id="reveal">Show in Finder</button>
-            <button id="delete" class="danger">Delete</button>
-          </div>
-        </header>
-        <iframe id="frame" title="Work Map"></iframe>
+            <p id="summary" class="lede"></p>
+            <div id="chips" class="chips"></div>
+          </header>
+
+          <section id="teachback-card" class="card teachback hidden">
+            <div class="card-label"><span class="mini-orb"></span>How Friday understands it</div>
+            <p id="teachback"></p>
+            <div id="confirmed" class="confirmed hidden">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 10.5 3 3 7-7" /></svg>
+              Confirmed by the expert
+            </div>
+          </section>
+
+          <section id="before" class="card hidden"></section>
+
+          <h2 class="section-title">Steps</h2>
+          <ol id="steps" class="steps"></ol>
+
+          <section id="open-card" class="card open-qs hidden">
+            <div class="card-label">Still unclear</div>
+            <ul id="open-qs"></ul>
+          </section>
+
+          <h2 class="section-title" id="qas-title">What Friday asked</h2>
+          <section id="qas" class="card qas"></section>
+        </article>
       </div>
     </main>
+
     <script src="hub.js"></script>
   </body>
 </html>

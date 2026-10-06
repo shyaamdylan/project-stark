@@ -1618,6 +1618,8 @@ window.buddy.on('config', (c) => {
 });
 window.buddy.on('wake', setWake);
 // What it pointed at moved, or went away (see trackPointed in main.js).
+// A lesson started from the Skills hub ("Teach me"): show it like any answer.
+window.buddy.on('show-result', (res) => runAsk((res && res.title) || '', () => Promise.resolve(res)));
 window.buddy.on('repoint', ({ rect, label }) => {
   if (!state.pointerAt || state.guiding || state.executing) return;
   if (state.pointerMode === 'ring') {
