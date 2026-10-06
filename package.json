@@ -9,7 +9,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "dist": "electron-builder --mac",
-    "text": "electron . --text"
+    "text": "electron . --text",
+    "demo-app": "node demo/server.js"
   },
   "devDependencies": {
     "electron": "^44.5.1",

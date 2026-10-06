@@ -378,3 +378,19 @@ orb squeezes out a droplet → spark flies over → becomes the cursor, ring + v
 - Next steps: push-to-talk voice input, using `ANTHROPIC_API_KEY` to understand vaguer
   requests ("how do I export this?"), and a screenshot + OCR fallback for apps without
   accessibility info.
+
+## Demo sandbox (Ledra)
+
+A small, fictional accounts-payable app for recording the demo, with the cases from the AI Apprentice
+brief: an equipment invoice over €5,000 the OCR coded as opex, a supplier that bills December twice,
+and an invoice from the Czech subsidiary that needs a second approver.
+
+```bash
+npm run demo-app   # then open http://localhost:4173
+```
+
+- **Data sets** (user menu, top right): *Expert walkthrough* for teaching Friday, *New-hire practice* for
+  the lesson, with a fresh €7,200 servo drive invoice the expert never showed.
+- **Reset sandbox** (bottom left) puts the current data set back for the next take.
+- Everything is made up and stays in the browser (localStorage); nothing is sent anywhere.
+

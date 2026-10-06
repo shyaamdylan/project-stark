@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bills · Ledra</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23163a70'/%3E%3Cpath d='M11 8v16h11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="side">
+        <div class="brand">
+          <span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M11 8v16h11" /></svg></span>
+          <span class="brand-name">Ledra</span>
+        </div>
+        <button class="org" type="button" aria-label="Company: Kestrel Maschinenbau GmbH">
+          <span class="org-mark" aria-hidden="true">K</span>
+          <span class="org-name">Kestrel Maschinenbau GmbH</span>
+          <svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" /></svg>
+        </button>
+        <nav class="nav" aria-label="Main">
+          <a class="nav-item" aria-disabled="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.5 8 3l5.5 5.5M4 7v6h8V7" /></svg>Overview</a>
+          <a class="nav-item active" href="#/bills"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h8v11l-2-1.2-2 1.2-2-1.2-2 1.2v-11ZM6 6h4M6 8.5h4" /></svg>Bills<span class="nav-count" id="nav-count"></span></a>
+          <a class="nav-item" aria-disabled="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4.5h12v7H2zM2 7h12" /></svg>Payments</a>
+          <a class="nav-item" aria-disabled="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13.5v-7l5-3.5 5 3.5v7M6.5 13.5v-4h3v4" /></svg>Suppliers</a>
+          <a class="nav-item" aria-disabled="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13V8M8 13V3M13 13v-7" /></svg>Reports</a>
+        </nav>
+        <div class="side-foot">
+          <div class="sandbox">
+            <span class="sandbox-dot" aria-hidden="true"></span>
+            <div>
+              <div class="sandbox-title">Sandbox</div>
+              <div class="sandbox-sub">Fictional company and data</div>
+            </div>
+          </div>
+          <button class="link-btn" type="button" id="reset">Reset sandbox</button>
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="top">
+          <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
+          <div class="top-right">
+            <label class="search">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+              <input id="search" type="search" placeholder="Search bills" aria-label="Search bills" />
+              <kbd>/</kbd>
+            </label>
+            <div class="user-wrap">
+              <button class="user" type="button" id="user" aria-haspopup="true" aria-expanded="false">
+                <span class="avatar" id="avatar"></span>
+                <span class="user-name" id="user-name"></span>
+              </button>
+              <div class="menu" id="user-menu" role="menu" hidden>
+                <div class="menu-label">Sandbox data</div>
+                <button role="menuitemradio" data-set="expert" type="button">Expert walkthrough</button>
+                <button role="menuitemradio" data-set="trainee" type="button">New-hire practice</button>
+                <div class="menu-sep"></div>
+                <button role="menuitem" type="button" id="menu-reset">Reset this data</button>
+              </div>
+            </div>
+          </div>
+        </header>
+        <main id="view" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+      <span id="toast-text"></span>
+      <button type="button" class="toast-undo" id="toast-undo">Undo</button>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
