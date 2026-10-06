@@ -92,7 +92,8 @@ const Mic = (() => {
     const level = rms(buf);
     // Higher bar while the buddy is talking, so its own voice doesn't count as you.
     const threshold = Math.max(0.012, floor * 2.8) * (opts.gain ? opts.gain() : 1);
-    const loud = level > threshold;
+    // Loud and sustained like a voice, not a keystroke or a click (voice-detect.js).
+    const loud = level > threshold && VoiceDetect.isVoice(buf, threshold);
     if (opts.onLevel) opts.onLevel(speaking ? Math.min(1, level * 12) : 0);
 
     if (!speaking) {

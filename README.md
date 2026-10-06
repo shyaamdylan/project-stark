@@ -179,6 +179,10 @@ The orb lives in a black island flush in the screen's bottom-right corner, so it
 the MacBook's frame. Resting, it's a small nub with a dim orb. When Friday or Jarvis is active it
 grows up and to the left to hold everything: what they're doing (Listening, Thinking, Speaking),
 what they say, their questions and Jarvis's task panel. When they're done it shrinks back.
+It keeps out of the way: when the Dock is showing over the corner it slides just clear of it, and
+when the cursor comes for something underneath it slides straight up (and back once the cursor has
+gone). It stays put while it's asking you something. Growing, shrinking and moving are all eased:
+what's inside fades out before the shape shrinks.
 Left alone for 15 seconds (nothing said, no new step, no hover), it shrinks back to the nub even
 if a lesson or question is still open; the next thing that happens brings it straight back.
 It wakes the moment it hears its name: "Hey Friday" is spotted in the first second and a half of
@@ -206,6 +210,8 @@ top centre on every screen.
   echo cancellation FaceTime uses), so a video or song isn't heard as speech; the terminal says at
   startup whether that's available. As a backstop, while another app is playing sound, only speech
   that starts with "Hey Friday" or "Hey Jarvis" counts as talking to them.
+- **Typing isn't talking.** A keystroke is as loud as a word but only lasts a few milliseconds, so
+  sound only counts as speech when it fills most of each moment (`renderer/voice-detect.js`).
 - **Interrupting has to mean it.** Talk over them and their voice dips; if it's real words they
   stop and listen, but a cough, a sneeze, a laugh or an "um" just lets them carry on.
 - **It keeps up with the screen.** After pointing at something, the highlight follows it if the page

@@ -934,10 +934,26 @@ body.island #shell {
   background: #000;
   border-top-left-radius: 16px;
   overflow: hidden;
-  transition: width 0.45s cubic-bezier(0.32, 0.72, 0, 1), height 0.45s cubic-bezier(0.32, 0.72, 0, 1), border-radius 0.45s ease;
+  /* Growing: the shape opens, then what's in it fades in. Shrinking (below):
+     what's in it fades out first, then the shape eases down. */
+  transition: width 0.5s cubic-bezier(0.32, 0.72, 0, 1), height 0.5s cubic-bezier(0.32, 0.72, 0, 1), border-radius 0.5s ease, translate 0.55s cubic-bezier(0.32, 0.72, 0, 1);
+}
+body.island #shell:not(.open) {
+  transition-delay: 0.16s, 0.16s, 0.16s, 0s;
 }
 body.island #shell.open {
   border-top-left-radius: 24px;
+}
+/* Sliding clear of the cursor or the Dock (renderer.js 'island-offset'). Away
+   from the corner it's a free-floating panel, so every corner is rounded. */
+body.island #shell,
+body.island #orb {
+  /* The translate property, not transform, so the orb's own flare animation
+     (a transform) never snaps it back mid-slide. */
+  translate: var(--island-dx, 0px) var(--island-dy, 0px);
+}
+body.island.island-moved #shell {
+  border-radius: 18px;
 }
 body.island #shell-in {
   display: flex;
@@ -957,11 +973,11 @@ body.island #shell-in {
   --card-fill: rgba(255, 255, 255, 0.1);
   --card-line: rgba(255, 255, 255, 0.16);
   opacity: 1;
-  transition: opacity 0.25s ease 0.15s;
+  transition: opacity 0.25s ease 0.18s;
 }
 body.island #shell:not(.open) #shell-in {
   opacity: 0;
-  transition-delay: 0s;
+  transition: opacity 0.16s ease;
 }
 body.island #shell-in > *:not(#island-bar) {
   position: static;
@@ -969,7 +985,13 @@ body.island #shell-in > *:not(#island-bar) {
   transform: none;
   margin: 0 18px 0 0;
   box-shadow: none;
-  animation: island-in 0.3s ease both;
+  animation: island-in 0.3s ease backwards;
+  /* Going away fades out before it leaves the layout, so the island shrinks
+     after the text has gone, not with a jump. */
+  transition: opacity 0.18s ease, display 0.18s allow-discrete;
+}
+body.island #shell-in > .hidden:not(#island-bar) {
+  opacity: 0;
 }
 @keyframes island-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -1016,7 +1038,7 @@ body.island #agent-tag {
   background: transparent;
   font-size: 11px;
 }
-body.island #shell.open #island-bar {
+body.island #island-bar {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1041,7 +1063,7 @@ body.island #orb {
   right: 11px;
   bottom: 11px;
   z-index: 2;
-  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.6s ease;
+  transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), height 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.6s ease, translate 0.55s cubic-bezier(0.32, 0.72, 0, 1);
 }
 /* Waking: the dim dot swells into the full orb. */
 body.island #body {

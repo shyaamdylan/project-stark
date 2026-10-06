@@ -1580,7 +1580,30 @@ function fitShell() {
   // Closed, it's a small nub around the resting orb (sized in CSS).
   shell.style.width = open ? `${shellIn.offsetWidth}px` : '';
   shell.style.height = open ? `${shellIn.offsetHeight}px` : '';
+  reportIsland(open);
 }
+
+// Tell main how big the island is (and whether it's waiting on an answer), so
+// it can be kept clear of the cursor and the Dock. Only when it changes.
+let lastBox = '';
+function reportIsland(open) {
+  const nub = parseFloat(getComputedStyle(shell).getPropertyValue('--nub')) || 46;
+  const box = document.body.classList.contains('island')
+    ? { w: open ? shellIn.offsetWidth : nub, h: open ? shellIn.offsetHeight : nub, interactive: Boolean(state.answering || state.promptOpen || state.typingAnswer || state.guideTyping || state.listening === 'confirm') }
+    : { w: 0, h: 0, interactive: false };
+  const key = JSON.stringify(box);
+  if (key === lastBox) return;
+  lastBox = key;
+  window.buddy.islandBox(box);
+}
+
+// Slide out of the way (main.js works out where): the island and the orb move
+// together along the edge, smoothly, and back again.
+window.buddy.on('island-offset', ({ x, y }) => {
+  document.body.style.setProperty('--island-dx', `${x}px`);
+  document.body.style.setProperty('--island-dy', `${y}px`);
+  document.body.classList.toggle('island-moved', Boolean(x || y));
+});
 new ResizeObserver(fitShell).observe(shellIn);
 // Things appearing or hiding (and waking or resting) change what it holds.
 new MutationObserver(fitShell).observe(buddyEl, { attributes: true, attributeFilter: ['class'], subtree: true });

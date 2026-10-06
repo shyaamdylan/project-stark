@@ -62,6 +62,7 @@ const voice = require('./src/voice');
 const { findNotches, overlayLayout } = require('./src/notch');
 const { checkOtherAudio } = require('./src/macaudio');
 const { makeStationary } = require('./src/stationary');
+const { avoid } = require('./src/avoid');
 const { relocate, anchorFor, followAnchor, moved } = require('./src/track');
 
 const ASK_SHORTCUT = 'CommandOrControl+Shift+Space';
@@ -201,7 +202,51 @@ function startCursorTracking() {
     const p = screen.getCursorScreenPoint();
     const b = win.getBounds();
     win.webContents.send('cursor', { x: p.x - b.x, y: p.y - b.y });
+    keepIslandClear(p, b);
   }, 50);
+  refreshDock();
+  setInterval(refreshDock, 15000);
+}
+
+// ---------- the corner island keeps out of the way (src/avoid.js) ----------
+//
+// Of the Dock when it's showing over the corner, and of the cursor when it
+// comes for something underneath. The renderer reports the island's size; this
+// works out how far to slide it and tells the renderer, which animates it.
+let islandBox = null; // { w, h, interactive } from the renderer
+let avoidState = {};
+let islandOffset = { x: 0, y: 0 };
+let dockInfo = null; // { side, autohide, rect }
+
+ipcMain.on('island-box', (_e, box) => {
+  islandBox = box && box.w > 0 ? box : null;
+});
+
+function keepIslandClear(p, b) {
+  if (!islandBox) return;
+  const r = avoid({ island: islandBox, screen: { x: b.x, y: b.y, w: b.width, h: b.height }, dock: dockInfo, cursor: p }, avoidState);
+  avoidState = r.state;
+  if (r.offset.x === islandOffset.x && r.offset.y === islandOffset.y) return;
+  islandOffset = r.offset;
+  win.webContents.send('island-offset', islandOffset);
+}
+
+// Where the Dock is: its side and auto-hide setting, and its frame from
+// accessibility (which apps' icons it holds changes its length).
+const DOCK_JXA = `var d = Application('System Events').processes.byName('Dock'); var l = d.uiElements[0]; JSON.stringify({ p: l.position(), s: l.size() });`;
+function refreshDock() {
+  if (process.platform !== 'darwin') return;
+  const read = (key) => new Promise((resolve) => execFile('/usr/bin/defaults', ['read', 'com.apple.dock', key], { timeout: 2000 }, (err, out) => resolve(err ? '' : String(out).trim())));
+  Promise.all([read('orientation'), read('autohide'), new Promise((resolve) => execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', DOCK_JXA], { timeout: 3000 }, (err, out) => resolve(err ? null : out)))])
+    .then(([side, autohide, frame]) => {
+      let rect = null;
+      try {
+        const f = JSON.parse(String(frame));
+        if (f && f.s && f.s[0] > 0) rect = { x: f.p[0], y: f.p[1], w: f.s[0], h: f.s[1] };
+      } catch {}
+      dockInfo = rect ? { side: ['left', 'right'].includes(side) ? side : 'bottom', autohide: autohide === '1', rect } : null;
+    })
+    .catch(() => {});
 }
 
 let overlayInteractive = false;
