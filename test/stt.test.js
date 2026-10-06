@@ -40,3 +40,19 @@ test('ordinary speech in another language is dropped and reported as other peopl
     assert.deepEqual(await transcribe(wav, cfg), { text: 'show me the nose', others: false });
   } finally { t.restore(); }
 });
+
+test('if the pinned language is refused, the name check still goes through unpinned', async () => {
+  const real = global.fetch;
+  const sent = [];
+  global.fetch = async (_url, { body }) => {
+    sent.push(body.get('language_code'));
+    if (body.get('language_code')) return { ok: false, status: 400, text: async () => 'bad language_code', json: async () => ({}) };
+    return { ok: true, json: async () => ({ text: 'Hey Friday', language_code: 'eng', language_probability: 0.9 }) };
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    assert.deepEqual(await transcribe(wav, cfg, { forName: true }), { text: 'Hey Friday', others: false });
+    assert.deepEqual(sent, ['en', null]);
+  } finally { global.fetch = real; console.error = quiet; }
+});

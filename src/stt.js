@@ -35,14 +35,22 @@ function judgeSpeech(body, languages = ['en']) {
 // else's speech (so the caller knows other people are talking nearby).
 async function transcribe(wav, cfg, { forName = false, forUs = false } = {}) {
   if (!cfg.elevenLabs.apiKey) throw new Error('No ELEVENLABS_API_KEY');
-  const form = new FormData();
-  form.append('model_id', 'scribe_v2');
-  form.append('tag_audio_events', 'false'); // no "(keyboard clicking)" for typing noises
   const languages = cfg.speechLanguages || ['en'];
   const pinned = forName || forUs;
-  if (pinned) form.append('language_code', languages[0]);
-  form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
-  const res = await fetch(STT_URL, { method: 'POST', headers: { 'xi-api-key': cfg.elevenLabs.apiKey }, body: form });
+  const send = (language) => {
+    const form = new FormData();
+    form.append('model_id', 'scribe_v2');
+    form.append('tag_audio_events', 'false'); // no "(keyboard clicking)" for typing noises
+    if (language) form.append('language_code', language);
+    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
+    return fetch(STT_URL, { method: 'POST', headers: { 'xi-api-key': cfg.elevenLabs.apiKey }, body: form });
+  };
+  let res = await send(pinned ? languages[0] : null);
+  // The language not accepted: hearing the name matters more than pinning it.
+  if (pinned && !res.ok && res.status >= 400 && res.status < 500) {
+    console.error(`[stt] pinned to "${languages[0]}" refused (${res.status}): ${(await res.text()).slice(0, 200)}`);
+    res = await send(null);
+  }
   if (!res.ok) throw new Error(`Speech to text failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
   const body = await res.json();
   if (pinned) return { text: String(body.text || '').trim(), others: false };

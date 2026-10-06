@@ -1468,8 +1468,7 @@ function bargeProgress(ms) {
   const b = barge;
   if (!b || b.checking || ms < BARGE_MS) return;
   b.checking = true;
-  window.buddy
-    .transcribe(Mic.peek())
+  hear(Mic.peek())
     .then((t) => {
       if (barge !== b) return;
       barge = null;
