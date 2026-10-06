@@ -153,11 +153,12 @@ setInterval(() => {
   fitShell();
 }, 1000);
 
-// Is something going on right now (a lesson, a task, a conversation, or it's
-// thinking, talking or hearing you)? Then the orb looks fully awake, even
-// while the panel is folded away for being left alone.
+// Is it actively engaged: listening to respond (woken by its name or the
+// shortcut, a follow-up, a lesson or task) or answering (thinking, talking)?
+// Then the orb looks fully awake, even with the panel folded away. Only
+// listening for its name is dormant, whatever the mic hears.
 function lively() {
-  return awake() || state.busy || ['talking', 'thinking', 'hearing'].some((c) => buddyEl.classList.contains(c));
+  return awake() || state.busy || ['talking', 'thinking'].some((c) => buddyEl.classList.contains(c));
 }
 
 function showStatus() {
@@ -1275,6 +1276,8 @@ function wakeUp() {
   active();
   if (state.wakingUntil > Date.now()) return;
   state.wakingUntil = Date.now() + WAKING_MS;
+  // Still mid-sentence: from now on it's hearing you.
+  if (Mic.isSpeaking()) buddyEl.classList.add('hearing');
   flare();
   window.buddy.prepare();
   setTimeout(updateMic, 0);
@@ -1451,7 +1454,9 @@ function updateMic() {
         bargeStart();
         clearTimeout(autoSendTimer);
         clearTimeout(listenTimeout);
-        buddyEl.classList.add('hearing');
+        // Only shows it's hearing you when it's listening to respond; while it
+        // just waits for its name, sounds in the room change nothing on screen.
+        if (isActive() || state.wakingUntil > Date.now()) buddyEl.classList.add('hearing');
         window.buddy.teachSpeaking(true);
       },
       onProgress: bargeProgress,
